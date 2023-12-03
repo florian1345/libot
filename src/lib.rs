@@ -89,6 +89,12 @@ impl BotBuilder {
     }
 }
 
+impl Default for BotBuilder {
+    fn default() -> BotBuilder {
+        BotBuilder::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
