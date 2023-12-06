@@ -15,3 +15,5 @@ thiserror = "1.0"
 
 [dev-dependencies]
 kernal = "0.3"
+rstest = "0.18"
+serde_json = "1.0"

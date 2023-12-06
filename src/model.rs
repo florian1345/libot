@@ -320,3 +320,111 @@ impl<'de> Deserialize<'de> for Event {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use kernal::prelude::*;
+
+    use rstest::rstest;
+
+    use serde_json::{Deserializer as JsonDeserializer, Result as JsonResult};
+
+    fn parse_game_status(json: &str) -> JsonResult<Option<GameStatus>> {
+        let mut deserializer = JsonDeserializer::from_str(&json);
+        deserialize_game_status(&mut deserializer)
+    }
+
+    #[rstest]
+    #[case::created(10, GameStatus::Created)]
+    #[case::started(20, GameStatus::Started)]
+    #[case::aborted(25, GameStatus::Aborted)]
+    #[case::mate(30, GameStatus::Mate)]
+    #[case::resign(31, GameStatus::Resign)]
+    #[case::stalemate(32, GameStatus::Stalemate)]
+    #[case::timeout(33, GameStatus::Timeout)]
+    #[case::draw(34, GameStatus::Draw)]
+    #[case::out_of_time(35, GameStatus::OutOfTime)]
+    #[case::cheat(36, GameStatus::Cheat)]
+    #[case::no_start(37, GameStatus::NoStart)]
+    #[case::unknown_finish(38, GameStatus::UnknownFinish)]
+    #[case::variant_end(60, GameStatus::VariantEnd)]
+    fn parse_game_status_works_for_id_only(#[case] id: i64, #[case] expected_status: GameStatus) {
+        let json = format!("{{\"id\":{}}}", id);
+
+        let status = parse_game_status(&json).unwrap();
+
+        assert_that!(status).contains(expected_status);
+    }
+
+    #[rstest]
+    #[case::created("created", GameStatus::Created)]
+    #[case::started("started", GameStatus::Started)]
+    #[case::aborted("aborted", GameStatus::Aborted)]
+    #[case::mate("mate", GameStatus::Mate)]
+    #[case::resign("resign", GameStatus::Resign)]
+    #[case::stalemate("stalemate", GameStatus::Stalemate)]
+    #[case::timeout("timeout", GameStatus::Timeout)]
+    #[case::draw("draw", GameStatus::Draw)]
+    #[case::out_of_time("outoftime", GameStatus::OutOfTime)]
+    #[case::cheat("cheat", GameStatus::Cheat)]
+    #[case::no_start("noStart", GameStatus::NoStart)]
+    #[case::unknown_finish("unknownFinish", GameStatus::UnknownFinish)]
+    #[case::variant_end("variantEnd", GameStatus::VariantEnd)]
+    fn parse_game_status_works_for_name_only(#[case] name: &str, #[case] expected_status: GameStatus) {
+        let json = format!("{{\"name\":\"{}\"}}", name);
+
+        let status = parse_game_status(&json).unwrap();
+
+        assert_that!(status).contains(expected_status);
+    }
+
+    #[rstest]
+    #[case::created(10, "created", GameStatus::Created)]
+    #[case::started(20, "started", GameStatus::Started)]
+    #[case::aborted(25, "aborted", GameStatus::Aborted)]
+    #[case::mate(30, "mate", GameStatus::Mate)]
+    #[case::resign(31, "resign", GameStatus::Resign)]
+    #[case::stalemate(32, "stalemate", GameStatus::Stalemate)]
+    #[case::timeout(33, "timeout", GameStatus::Timeout)]
+    #[case::draw(34, "draw", GameStatus::Draw)]
+    #[case::out_of_time(35, "outoftime", GameStatus::OutOfTime)]
+    #[case::cheat(36, "cheat", GameStatus::Cheat)]
+    #[case::no_start(37, "noStart", GameStatus::NoStart)]
+    #[case::unknown_finish(38, "unknownFinish", GameStatus::UnknownFinish)]
+    #[case::variant_end(60, "variantEnd", GameStatus::VariantEnd)]
+    fn parse_game_status_works_for_id_and_name(
+            #[case] id: i64,
+            #[case] name: &str,
+            #[case] expected_status: GameStatus) {
+        let json = format!("{{\"id\":{},\"name\":\"{}\"}}", id, name);
+
+        let status = parse_game_status(&json).unwrap();
+
+        assert_that!(status).contains(expected_status);
+    }
+
+    #[rstest]
+    #[case::unknown_id("{\"id\":5}")]
+    #[case::unknown_name("{\"name\":\"help\"}")]
+    #[case::mismatch("{\"id\":10,\"name\":\"aborted\"}")]
+    fn parse_game_status_fails(#[case] json: &str) {
+        let status = parse_game_status(&json);
+
+        assert_that!(status).is_err();
+    }
+
+    #[rstest]
+    #[case::null("null")]
+    #[case::empty("{}")]
+    #[case::null_id("{\"id\":null}")]
+    #[case::null_name("{\"name\":null}")]
+    #[case::null_id_and_name("{\"id\":null,\"name\":null}")]
+    fn parse_game_status_is_none(#[case] json: &str) {
+        let status = parse_game_status(&json).unwrap();
+
+        assert_that!(status).is_none();
+    }
+}
