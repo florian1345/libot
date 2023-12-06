@@ -138,7 +138,7 @@ where
     }).await
 }
 
-pub async fn run(bot: impl Bot, mut client: BotClient) -> reqwest::Result<()> {
+pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
     let response = client.send_request(Method::GET, EVENT_PATH).await?;
     let ndjson_config = NdjsonConfig::default()
         .with_empty_line_handling(EmptyLineHandling::IgnoreEmpty);
