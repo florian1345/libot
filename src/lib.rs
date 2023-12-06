@@ -1,10 +1,21 @@
-use reqwest::header::{AUTHORIZATION, HeaderMap, InvalidHeaderValue};
+use std::fmt::Debug;
+
+use futures::Stream;
+use futures::stream::StreamExt;
+
+use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
+
 use reqwest::{Client, ClientBuilder, Error as ReqwestError, Method, Response, Result as ReqwestResult};
+use reqwest::header::{AUTHORIZATION, HeaderMap, InvalidHeaderValue};
 
 use thiserror::Error;
 
+use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo};
+
+mod model;
+
 #[derive(Debug)]
-pub struct Bot {
+pub struct BotClient {
     client: Client,
     base_url: String
 }
@@ -24,8 +35,8 @@ fn join_url(base_url: &str, path: &str) -> String {
     url
 }
 
-impl Bot {
-    pub async fn send_request(&mut self, method: Method, path: &str) -> ReqwestResult<Response> {
+impl BotClient {
+    pub(crate) async fn send_request(&self, method: Method, path: &str) -> ReqwestResult<Response> {
         let url = join_url(&self.base_url, path);
         self.client.request(method, url).send().await
     }
@@ -34,7 +45,7 @@ impl Bot {
 const DEFAULT_BASE_URL: &str = "https://lichess.org/api";
 
 #[derive(Debug, Error)]
-pub enum BotBuilderError {
+pub enum BotClientBuilderError {
     #[error("no token specified")]
     NoToken,
 
@@ -45,82 +56,125 @@ pub enum BotBuilderError {
     ClientError(#[from] ReqwestError)
 }
 
-pub type BotBuilderResult = Result<Bot, BotBuilderError>;
+pub type BotClientBuilderResult = Result<BotClient, BotClientBuilderError>;
 
-pub struct BotBuilder {
+pub struct BotClientBuilder {
     token: Option<String>,
     base_url: String
 }
 
-impl BotBuilder {
+impl BotClientBuilder {
 
-    pub fn new() -> BotBuilder {
-        BotBuilder {
+    pub fn new() -> BotClientBuilder {
+        BotClientBuilder {
             token: None,
             base_url: DEFAULT_BASE_URL.to_owned()
         }
     }
 
-    pub fn with_token(mut self, token: impl Into<String>) -> BotBuilder {
+    pub fn with_token(mut self, token: impl Into<String>) -> BotClientBuilder {
         self.token = Some(token.into());
         self
     }
 
-    pub fn with_base_url(mut self, base_url: impl Into<String>) -> BotBuilder {
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> BotClientBuilder {
         self.base_url = base_url.into();
         self
     }
 
-    pub fn build(self) -> BotBuilderResult {
+    pub fn build(self) -> BotClientBuilderResult {
         if let Some(token) = self.token {
             let mut headers = HeaderMap::new();
             let authorization_value = format!("Bearer {}", token).parse()?;
             headers.insert(AUTHORIZATION, authorization_value);
             let client = ClientBuilder::new().default_headers(headers).build()?;
 
-            Ok(Bot {
+            Ok(BotClient {
                 client,
                 base_url: self.base_url
             })
         }
         else {
-            Err(BotBuilderError::NoToken)
+            Err(BotClientBuilderError::NoToken)
         }
     }
 }
 
-impl Default for BotBuilder {
-    fn default() -> BotBuilder {
-        BotBuilder::new()
+impl Default for BotClientBuilder {
+    fn default() -> BotClientBuilder {
+        BotClientBuilder::new()
     }
+}
+
+#[async_trait::async_trait]
+pub trait Bot {
+
+    async fn on_game_start(&self, game: GameEventInfo);
+
+    async fn on_game_finish(&self, game: GameEventInfo);
+
+    async fn on_challenge(&self, challenge: Challenge);
+
+    async fn on_challenge_cancelled(&self, challenge: Challenge);
+
+    async fn on_challenge_declined(&self, challenge: ChallengeDeclined);
+}
+
+const EVENT_PATH: &str = "/stream/event";
+
+async fn run_with_event_stream<E>(bot: impl Bot, event_stream: impl Stream<Item = Result<Event, E>>)
+where
+    E: Debug
+{
+    event_stream.for_each(|record| async {
+        // TODO enable error handling
+        match record.unwrap() {
+            Event::GameStart(game) => bot.on_game_start(game).await,
+            Event::GameFinish(game) => bot.on_game_finish(game).await,
+            Event::Challenge(challenge) => bot.on_challenge(challenge).await,
+            Event::ChallengeCancelled(challenge) => bot.on_challenge_cancelled(challenge).await,
+            Event::ChallengeDeclined(challenge) => bot.on_challenge_declined(challenge).await
+        }
+    }).await
+}
+
+pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
+    let response = client.send_request(Method::GET, EVENT_PATH).await?;
+    let ndjson_config = NdjsonConfig::default()
+        .with_empty_line_handling(EmptyLineHandling::IgnoreEmpty);
+    let stream =
+        ndjson_stream::from_fallible_stream_with_config::<Event, _>(
+            response.bytes_stream(), ndjson_config);
+
+    #[allow(clippy::unit_arg)]
+    Ok(run_with_event_stream(bot, stream).await)
 }
 
 #[cfg(test)]
 mod tests {
+    use kernal::prelude::*;
 
     use super::*;
 
-    use kernal::prelude::*;
-
     #[test]
-    fn building_bot_fails_without_token() {
-        let result = BotBuilder::new().build();
+    fn building_bot_client_fails_without_token() {
+        let result = BotClientBuilder::new().build();
 
-        assert!(matches!(result, Err(BotBuilderError::NoToken)));
+        assert!(matches!(result, Err(BotClientBuilderError::NoToken)));
     }
 
     #[test]
-    fn building_bot_fails_with_invalid_token() {
-        let result = BotBuilder::new()
+    fn building_bot_client_fails_with_invalid_token() {
+        let result = BotClientBuilder::new()
             .with_token("\0")
             .build();
 
-        assert!(matches!(result, Err(BotBuilderError::InvalidToken(_))));
+        assert!(matches!(result, Err(BotClientBuilderError::InvalidToken(_))));
     }
 
     #[test]
-    fn building_bot_succeeds_with_valid_token_and_default_base_url() {
-        let result = BotBuilder::new()
+    fn building_bot_client_succeeds_with_valid_token_and_default_base_url() {
+        let result = BotClientBuilder::new()
             .with_token("abc123")
             .build();
 
@@ -129,9 +183,9 @@ mod tests {
     }
 
     #[test]
-    fn building_bot_succeeds_with_valid_token_and_overridden_base_url() {
+    fn building_bot_client_succeeds_with_valid_token_and_overridden_base_url() {
         let base_url = "https://base.url/path";
-        let result = BotBuilder::new()
+        let result = BotClientBuilder::new()
             .with_token("abc123")
             .with_base_url(base_url)
             .build();
