@@ -120,7 +120,7 @@ pub trait Bot {
     async fn on_challenge_declined(&self, challenge: ChallengeDeclined);
 }
 
-const EVENT_PATH: &'static str = "/stream/event";
+const EVENT_PATH: &str = "/stream/event";
 
 async fn run_with_event_stream<E>(bot: impl Bot, event_stream: impl Stream<Item = Result<Event, E>>)
 where
@@ -146,6 +146,7 @@ pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
         ndjson_stream::from_fallible_stream_with_config::<Event, _>(
             response.bytes_stream(), ndjson_config);
 
+    #[allow(clippy::unit_arg)]
     Ok(run_with_event_stream(bot, stream).await)
 }
 

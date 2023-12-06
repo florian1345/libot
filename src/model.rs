@@ -173,19 +173,20 @@ pub enum ChallengeStatus {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Title {
-    GM,
-    WGM,
-    IM,
-    WIM,
-    FM,
-    WFM,
-    NM,
-    WNM,
-    CM,
-    WCM,
-    LM,
-    BOT
+    Gm,
+    Wgm,
+    Im,
+    Wim,
+    Fm,
+    Wfm,
+    Nm,
+    Wnm,
+    Cm,
+    Wcm,
+    Lm,
+    Bot
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
