@@ -152,7 +152,14 @@ pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+    use std::sync::{Arc, Mutex};
+
+    use futures::stream;
+
     use kernal::prelude::*;
+    use rstest::rstest;
+    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, Speed, TimeControl, User};
 
     use super::*;
 
@@ -232,5 +239,115 @@ mod tests {
         let url = join_url(base_url, path);
 
         assert_that!(url.as_str()).is_equal_to("https://lichess.org/api/bot/whatever");
+    }
+
+    struct EventTrackingBot {
+        events: Arc<Mutex<Vec<Event>>>
+    }
+
+    #[async_trait::async_trait]
+    impl Bot for EventTrackingBot {
+        async fn on_game_start(&self, game: GameEventInfo) {
+            self.events.lock().unwrap().push(Event::GameStart(game));
+        }
+
+        async fn on_game_finish(&self, game: GameEventInfo) {
+            self.events.lock().unwrap().push(Event::GameFinish(game));
+        }
+
+        async fn on_challenge(&self, challenge: Challenge) {
+            self.events.lock().unwrap().push(Event::Challenge(challenge));
+        }
+
+        async fn on_challenge_cancelled(&self, challenge: Challenge) {
+            self.events.lock().unwrap().push(Event::ChallengeCanceled(challenge));
+        }
+
+        async fn on_challenge_declined(&self, challenge: ChallengeDeclined) {
+            self.events.lock().unwrap().push(Event::ChallengeDeclined(challenge));
+        }
+    }
+
+    fn test_game_event_info(id: &str) -> GameEventInfo {
+        GameEventInfo {
+            id: Some(id.to_owned()),
+            source: None,
+            status: None,
+            winner: None,
+            compat: None
+        }
+    }
+
+    fn test_challenge(id: &str) -> Challenge {
+        Challenge {
+            id: id.to_owned(),
+            url: "testUrl".to_owned(),
+            status: ChallengeStatus::Created,
+            challenger: User {
+                rating: None,
+                provisional: None,
+                online: None,
+                id: "testUserId".to_owned(),
+                name: "testUserName".to_owned(),
+                title: None,
+                patron: None,
+            },
+            dest_user: None,
+            variant: None,
+            rated: false,
+            speed: Speed::UltraBullet,
+            time_control: TimeControl::Unlimited,
+            color: ChallengeColor::White,
+            perf: ChallengePerf {
+                icon: None,
+                name: None
+            },
+            direction: None,
+            initial_fen: None,
+            decline_reason: None,
+            decline_reason_key: None,
+        }
+    }
+
+    #[rstest]
+    #[case::empty(vec![])]
+    #[case::on_game_start(vec![
+        Event::GameStart(test_game_event_info("testGameStartId"))
+    ])]
+    #[case::on_game_finish(vec![
+        Event::GameFinish(test_game_event_info("testGameFinishId"))
+    ])]
+    #[case::challenge(vec![
+        Event::Challenge(test_challenge("testChallengeId"))
+    ])]
+    #[case::challenge_canceled(vec![
+        Event::ChallengeCanceled(test_challenge("testChallengeCanceledId"))
+    ])]
+    #[case::challenge_declined(vec![
+        Event::ChallengeDeclined(ChallengeDeclined {
+            id: "testChallengeDeclined".to_owned()
+        })
+    ])]
+    #[case::multiple_events(vec![
+        Event::GameStart(test_game_event_info("firstEventId")),
+        Event::Challenge(test_challenge("secondEventId")),
+        Event::GameStart(test_game_event_info("thirdEventId"))
+    ])]
+    fn correct_events_are_called_on_bot(#[case] events: Vec<Event>) {
+        let tracked_events = Arc::new(Mutex::new(Vec::new()));
+        let bot = EventTrackingBot {
+            events: Arc::clone(&tracked_events)
+        };
+        let event_results = events.iter()
+            .cloned()
+            .map(Ok)
+            .collect::<Vec<Result<_, &str>>>();
+        let stream = stream::iter(event_results);
+
+        tokio_test::block_on(run_with_event_stream(bot, stream));
+
+        let tracked_events = tracked_events.lock().unwrap();
+
+        assert_that!(tracked_events.deref()).contains_exactly_in_given_order(events);
     }
 }
