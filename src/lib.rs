@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo};
 
-mod model;
+pub mod model;
 
 #[derive(Debug)]
 pub struct BotClient {
