@@ -132,7 +132,7 @@ where
             Event::GameStart(game) => bot.on_game_start(game).await,
             Event::GameFinish(game) => bot.on_game_finish(game).await,
             Event::Challenge(challenge) => bot.on_challenge(challenge).await,
-            Event::ChallengeCancelled(challenge) => bot.on_challenge_cancelled(challenge).await,
+            Event::ChallengeCanceled(challenge) => bot.on_challenge_cancelled(challenge).await,
             Event::ChallengeDeclined(challenge) => bot.on_challenge_declined(challenge).await
         }
     }).await
