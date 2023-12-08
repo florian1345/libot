@@ -146,8 +146,8 @@ pub enum Player {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
 pub struct Compat {
     // TODO Option<bool> correct?
-    bot: Option<bool>,
-    board: Option<bool>
+    pub bot: Option<bool>,
+    pub board: Option<bool>
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -273,8 +273,8 @@ pub enum ChallengeColor {
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 pub struct ChallengePerf {
-    icon: Option<String>,
-    name: Option<String>
+    pub icon: Option<String>,
+    pub name: Option<String>
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
