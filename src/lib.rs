@@ -5,14 +5,18 @@ use futures::stream::StreamExt;
 
 use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
 
-use reqwest::{Client, ClientBuilder, Error as ReqwestError, Method, Response, Result as ReqwestResult};
-use reqwest::header::{AUTHORIZATION, HeaderMap, InvalidHeaderValue};
+use reqwest::{Client, ClientBuilder, Method, Response};
+use reqwest::header::{AUTHORIZATION, HeaderMap};
 
-use thiserror::Error;
+use serde::Serialize;
 
-use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo, GameId};
+use error::{BotClientBuilderError, BotClientBuilderResult};
+
+use crate::error::LibotResult;
+use crate::model::{Challenge, ChallengeDeclined, DeclineReason, DeclineRequest, Event, GameEventInfo, GameId};
 
 pub mod model;
+mod error;
 
 #[derive(Debug)]
 pub struct BotClient {
@@ -36,41 +40,43 @@ fn join_url(base_url: &str, path: &str) -> String {
 }
 
 impl BotClient {
-    pub(crate) async fn send_request(&self, method: Method, path: &str) -> ReqwestResult<Response> {
+    pub(crate) async fn send_request(&self, method: Method, path: &str)
+            -> LibotResult<Response> {
         let url = join_url(&self.base_url, path);
-        self.client.request(method, url).send().await
+
+        Ok(self.client.request(method, url).send().await?)
     }
 
-    pub async fn accept_challenge(&self, challenge_id: GameId) -> ReqwestResult<()> {
+    pub(crate) async fn send_request_with_body(&self, method: Method, path: &str,
+            body: impl Serialize) -> LibotResult<Response> {
+        let url = join_url(&self.base_url, path);
+        let body = serde_json::to_string(&body)?;
+
+        Ok(self.client.request(method, url).body(body).send().await?)
+    }
+
+    pub async fn accept_challenge(&self, challenge_id: GameId) -> LibotResult<()> {
         // TODO error handling
         let path = format!("/challenge/{challenge_id}/accept");
         self.send_request(Method::POST, &path).await?;
+
         Ok(())
     }
 
-    pub async fn decline_challenge(&self, challenge_id: GameId) -> ReqwestResult<()> {
+    pub async fn decline_challenge(&self, challenge_id: GameId, reason: Option<DeclineReason>)
+            -> LibotResult<()> {
         // TODO error handling
         let path = format!("/challenge/{challenge_id}/decline");
-        self.send_request(Method::POST, &path).await?;
+        let body = DeclineRequest {
+            reason
+        };
+        self.send_request_with_body(Method::POST, &path, body).await?;
+
         Ok(())
     }
 }
 
 const DEFAULT_BASE_URL: &str = "https://lichess.org/api";
-
-#[derive(Debug, Error)]
-pub enum BotClientBuilderError {
-    #[error("no token specified")]
-    NoToken,
-
-    #[error("token is invalid: {0}")]
-    InvalidToken(#[from] InvalidHeaderValue),
-
-    #[error("error initializing client: {0}")]
-    ClientError(#[from] ReqwestError)
-}
-
-pub type BotClientBuilderResult = Result<BotClient, BotClientBuilderError>;
 
 pub struct BotClientBuilder {
     token: Option<String>,
@@ -155,7 +161,7 @@ where
     }).await
 }
 
-pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
+pub async fn run(bot: impl Bot, client: BotClient) -> LibotResult<()> {
     let response = client.send_request(Method::GET, EVENT_PATH).await?;
     let ndjson_config = NdjsonConfig::default()
         .with_empty_line_handling(EmptyLineHandling::IgnoreEmpty);
@@ -173,9 +179,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use futures::stream;
-
     use kernal::prelude::*;
     use rstest::rstest;
+
     use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, Speed, TimeControl, User};
 
     use super::*;
