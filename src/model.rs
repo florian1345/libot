@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde::de::Error as DeserializeError;
 
 use thiserror::Error;
@@ -284,6 +284,44 @@ pub enum ChallengeDirection {
     Out
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeclineReason {
+
+    /// Indicates that the bot does not accept challenges.
+    Generic,
+
+    /// Indicates that the bot does not accept challenges right now, but may later.
+    Later,
+
+    /// Indicates that the time control is too fast for the bot.
+    TooFast,
+
+    /// Indicates that the time control is too slow for the bot.
+    TooSlow,
+
+    /// Indicates that the bot does not accept challenges with the given time control.
+    TimeControl,
+
+    /// Indicates that the bot wants a rated challenge.
+    Rated,
+
+    /// Indicates that the bot wants a casual challenge.
+    Casual,
+
+    /// Indicates that the bot only accepts standard Chess.
+    Standard,
+
+    /// Indicates that the bot does not accept challenges of the given variant.
+    Variant,
+
+    /// Indicates that the bot does not accepts challenges from other bots.
+    NoBot,
+
+    /// Indicates that the bot only accepts challenges from other bots.
+    OnlyBot
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Challenge {
@@ -303,7 +341,7 @@ pub struct Challenge {
     pub direction: Option<ChallengeDirection>,
     pub initial_fen: Option<Fen>,
     pub decline_reason: Option<String>, // TODO unify with key?
-    pub decline_reason_key: Option<String>
+    pub decline_reason_key: Option<DeclineReason>
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -318,6 +356,13 @@ pub enum Event {
     Challenge(Challenge),
     ChallengeCanceled(Challenge),
     ChallengeDeclined(ChallengeDeclined)
+}
+
+#[derive(Serialize)]
+pub(crate) struct DeclineRequest {
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<DeclineReason>
 }
 
 impl<'de> Deserialize<'de> for Event {
@@ -869,7 +914,7 @@ mod tests {
                 "direction": "in",
                 "initialFen": "testFen",
                 "declineReason": "testDeclineReason",
-                "declineReasonKey": "testDeclineReasonKey"
+                "declineReasonKey": "noBot"
             }
         }"#,
         Event::ChallengeCanceled(Challenge {
@@ -890,7 +935,7 @@ mod tests {
             direction: Some(ChallengeDirection::In),
             initial_fen: Some("testFen".to_owned()),
             decline_reason: Some("testDeclineReason".to_owned()),
-            decline_reason_key: Some("testDeclineReasonKey".to_owned())
+            decline_reason_key: Some(DeclineReason::NoBot)
         })
     )]
     #[case::challenge_canceled_with_clock_time_control(
@@ -1001,5 +1046,39 @@ mod tests {
         let event = serde_json::from_str(json).unwrap();
 
         assert_that!(event).is_equal_to(expected_event);
+    }
+
+    #[test]
+    fn serialize_decline_request_without_reason() {
+        let decline_request = DeclineRequest {
+            reason: None
+        };
+
+        let serialized = serde_json::to_string(&decline_request).unwrap();
+
+        assert_that!(serialized).is_equal_to("{}".to_owned());
+    }
+
+    #[rstest]
+    #[case(DeclineReason::Generic, r#"{"reason":"generic"}"#)]
+    #[case(DeclineReason::Later, r#"{"reason":"later"}"#)]
+    #[case(DeclineReason::TooFast, r#"{"reason":"tooFast"}"#)]
+    #[case(DeclineReason::TooSlow, r#"{"reason":"tooSlow"}"#)]
+    #[case(DeclineReason::TimeControl, r#"{"reason":"timeControl"}"#)]
+    #[case(DeclineReason::Rated, r#"{"reason":"rated"}"#)]
+    #[case(DeclineReason::Casual, r#"{"reason":"casual"}"#)]
+    #[case(DeclineReason::Standard, r#"{"reason":"standard"}"#)]
+    #[case(DeclineReason::Variant, r#"{"reason":"variant"}"#)]
+    #[case(DeclineReason::NoBot, r#"{"reason":"noBot"}"#)]
+    #[case(DeclineReason::OnlyBot, r#"{"reason":"onlyBot"}"#)]
+    fn serialize_decline_request_with_reason(
+            #[case] reason: DeclineReason, #[case] expected_json: &str) {
+        let decline_request = DeclineRequest {
+            reason: Some(reason)
+        };
+
+        let serialized = serde_json::to_string(&decline_request).unwrap();
+
+        assert_that!(serialized).is_equal_to(expected_json.to_owned());
     }
 }
