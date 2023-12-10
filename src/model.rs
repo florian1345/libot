@@ -284,6 +284,44 @@ pub enum ChallengeDirection {
     Out
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeclineReason {
+
+    /// Indicates that the bot does not accept challenges.
+    Generic,
+
+    /// Indicates that the bot does not accept challenges right now, but may later.
+    Later,
+
+    /// Indicates that the time control is too fast for the bot.
+    TooFast,
+
+    /// Indicates that the time control is too slow for the bot.
+    TooSlow,
+
+    /// Indicates that the bot does not accept challenges with the given time control.
+    TimeControl,
+
+    /// Indicates that the bot wants a rated challenge.
+    Rated,
+
+    /// Indicates that the bot wants a casual challenge.
+    Casual,
+
+    /// Indicates that the bot only accepts standard Chess.
+    Standard,
+
+    /// Indicates that the bot does not accept challenges of the given variant.
+    Variant,
+
+    /// Indicates that the bot does not accepts challenges from other bots.
+    NoBot,
+
+    /// Indicates that the bot only accepts challenges from other bots.
+    OnlyBot
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Challenge {
@@ -303,7 +341,7 @@ pub struct Challenge {
     pub direction: Option<ChallengeDirection>,
     pub initial_fen: Option<Fen>,
     pub decline_reason: Option<String>, // TODO unify with key?
-    pub decline_reason_key: Option<String>
+    pub decline_reason_key: Option<DeclineReason>
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -869,7 +907,7 @@ mod tests {
                 "direction": "in",
                 "initialFen": "testFen",
                 "declineReason": "testDeclineReason",
-                "declineReasonKey": "testDeclineReasonKey"
+                "declineReasonKey": "noBot"
             }
         }"#,
         Event::ChallengeCanceled(Challenge {
@@ -890,7 +928,7 @@ mod tests {
             direction: Some(ChallengeDirection::In),
             initial_fen: Some("testFen".to_owned()),
             decline_reason: Some("testDeclineReason".to_owned()),
-            decline_reason_key: Some("testDeclineReasonKey".to_owned())
+            decline_reason_key: Some(DeclineReason::NoBot)
         })
     )]
     #[case::challenge_canceled_with_clock_time_control(

@@ -10,7 +10,7 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, InvalidHeaderValue};
 
 use thiserror::Error;
 
-use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo};
+use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo, GameId};
 
 pub mod model;
 
@@ -39,6 +39,20 @@ impl BotClient {
     pub(crate) async fn send_request(&self, method: Method, path: &str) -> ReqwestResult<Response> {
         let url = join_url(&self.base_url, path);
         self.client.request(method, url).send().await
+    }
+
+    pub async fn accept_challenge(&self, challenge_id: GameId) -> ReqwestResult<()> {
+        // TODO error handling
+        let path = format!("/challenge/{challenge_id}/accept");
+        self.send_request(Method::POST, &path).await?;
+        Ok(())
+    }
+
+    pub async fn decline_challenge(&self, challenge_id: GameId) -> ReqwestResult<()> {
+        // TODO error handling
+        let path = format!("/challenge/{challenge_id}/decline");
+        self.send_request(Method::POST, &path).await?;
+        Ok(())
     }
 }
 
@@ -109,31 +123,34 @@ impl Default for BotClientBuilder {
 #[async_trait::async_trait]
 pub trait Bot {
 
-    async fn on_game_start(&self, game: GameEventInfo);
+    async fn on_game_start(&self, game: GameEventInfo, client: &BotClient);
 
-    async fn on_game_finish(&self, game: GameEventInfo);
+    async fn on_game_finish(&self, game: GameEventInfo, client: &BotClient);
 
-    async fn on_challenge(&self, challenge: Challenge);
+    async fn on_challenge(&self, challenge: Challenge, client: &BotClient);
 
-    async fn on_challenge_cancelled(&self, challenge: Challenge);
+    async fn on_challenge_cancelled(&self, challenge: Challenge, client: &BotClient);
 
-    async fn on_challenge_declined(&self, challenge: ChallengeDeclined);
+    async fn on_challenge_declined(&self, challenge: ChallengeDeclined, client: &BotClient);
 }
 
 const EVENT_PATH: &str = "/stream/event";
 
-async fn run_with_event_stream<E>(bot: impl Bot, event_stream: impl Stream<Item = Result<Event, E>>)
+async fn run_with_event_stream<E>(bot: impl Bot, event_stream: impl Stream<Item = Result<Event, E>>,
+    client: &BotClient)
 where
     E: Debug
 {
     event_stream.for_each(|record| async {
         // TODO enable error handling
         match record.unwrap() {
-            Event::GameStart(game) => bot.on_game_start(game).await,
-            Event::GameFinish(game) => bot.on_game_finish(game).await,
-            Event::Challenge(challenge) => bot.on_challenge(challenge).await,
-            Event::ChallengeCanceled(challenge) => bot.on_challenge_cancelled(challenge).await,
-            Event::ChallengeDeclined(challenge) => bot.on_challenge_declined(challenge).await
+            Event::GameStart(game) => bot.on_game_start(game, client).await,
+            Event::GameFinish(game) => bot.on_game_finish(game, client).await,
+            Event::Challenge(challenge) => bot.on_challenge(challenge, client).await,
+            Event::ChallengeCanceled(challenge) =>
+                bot.on_challenge_cancelled(challenge, client).await,
+            Event::ChallengeDeclined(challenge) =>
+                bot.on_challenge_declined(challenge, client).await
         }
     }).await
 }
@@ -147,7 +164,7 @@ pub async fn run(bot: impl Bot, client: BotClient) -> reqwest::Result<()> {
             response.bytes_stream(), ndjson_config);
 
     #[allow(clippy::unit_arg)]
-    Ok(run_with_event_stream(bot, stream).await)
+    Ok(run_with_event_stream(bot, stream, &client).await)
 }
 
 #[cfg(test)]
@@ -247,23 +264,23 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Bot for EventTrackingBot {
-        async fn on_game_start(&self, game: GameEventInfo) {
+        async fn on_game_start(&self, game: GameEventInfo, _: &BotClient) {
             self.events.lock().unwrap().push(Event::GameStart(game));
         }
 
-        async fn on_game_finish(&self, game: GameEventInfo) {
+        async fn on_game_finish(&self, game: GameEventInfo, _: &BotClient) {
             self.events.lock().unwrap().push(Event::GameFinish(game));
         }
 
-        async fn on_challenge(&self, challenge: Challenge) {
+        async fn on_challenge(&self, challenge: Challenge, _: &BotClient) {
             self.events.lock().unwrap().push(Event::Challenge(challenge));
         }
 
-        async fn on_challenge_cancelled(&self, challenge: Challenge) {
+        async fn on_challenge_cancelled(&self, challenge: Challenge, _: &BotClient) {
             self.events.lock().unwrap().push(Event::ChallengeCanceled(challenge));
         }
 
-        async fn on_challenge_declined(&self, challenge: ChallengeDeclined) {
+        async fn on_challenge_declined(&self, challenge: ChallengeDeclined, _: &BotClient) {
             self.events.lock().unwrap().push(Event::ChallengeDeclined(challenge));
         }
     }
@@ -343,8 +360,9 @@ mod tests {
             .map(Ok)
             .collect::<Vec<Result<_, &str>>>();
         let stream = stream::iter(event_results);
+        let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
 
-        tokio_test::block_on(run_with_event_stream(bot, stream));
+        tokio_test::block_on(run_with_event_stream(bot, stream, &mock_client));
 
         let tracked_events = tracked_events.lock().unwrap();
 
