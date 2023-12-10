@@ -5,7 +5,7 @@ use serde_json::Error as JsonError;
 
 use thiserror::Error;
 
-use crate::BotClient;
+use crate::client::BotClient;
 
 #[derive(Debug, Error)]
 pub enum LibotRequestError {
