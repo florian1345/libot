@@ -32,13 +32,14 @@ pub trait Bot : Sync {
     async fn on_challenge_declined(&self, _challenge: ChallengeDeclinedEvent, _client: &BotClient)
         { }
 
-    async fn on_game_full(&self, _game_full: GameFullEvent, _client: &BotClient) { }
+    async fn on_game_full(&self, _id: GameId, _game_full: GameFullEvent, _client: &BotClient) { }
 
-    async fn on_game_state(&self, _state: GameStateEvent, _client: &BotClient) { }
+    async fn on_game_state(&self, _id: GameId, _state: GameStateEvent, _client: &BotClient) { }
 
-    async fn on_chat_line(&self, _chat_line: ChatLineEvent, _client: &BotClient) { }
+    async fn on_chat_line(&self, _id: GameId, _chat_line: ChatLineEvent, _client: &BotClient) { }
 
-    async fn on_opponent_gone(&self, _opponent_gone: OpponentGoneEvent, _client: &BotClient) { }
+    async fn on_opponent_gone(&self, _id: GameId, _opponent_gone: OpponentGoneEvent,
+        _client: &BotClient) { }
 }
 
 const EVENT_PATH: &str = "/stream/event";
@@ -48,18 +49,21 @@ fn game_event_path(game_id: &GameId) -> String {
 }
 
 async fn run_with_game_event_stream<E>(bot: &impl Bot,
-    event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient)
+    event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient, game_id: GameId)
 where
     E: Debug
 {
     event_stream.for_each(|record| async {
         // TODO enable error handling
         match record.unwrap() {
-            GameEvent::GameFull(game_full) => bot.on_game_full(game_full, client).await,
-            GameEvent::GameState(state) => bot.on_game_state(state, client).await,
-            GameEvent::ChatLine(chat_line) => bot.on_chat_line(chat_line, client).await,
+            GameEvent::GameFull(game_full) =>
+                bot.on_game_full(game_id.clone(), game_full, client).await,
+            GameEvent::GameState(state) =>
+                bot.on_game_state(game_id.clone(), state, client).await,
+            GameEvent::ChatLine(chat_line) =>
+                bot.on_chat_line(game_id.clone(), chat_line, client).await,
             GameEvent::OpponentGone(opponent_gone) =>
-                bot.on_opponent_gone(opponent_gone, client).await,
+                bot.on_opponent_gone(game_id.clone(), opponent_gone, client).await,
         }
     }).await
 }
@@ -73,17 +77,19 @@ where
         // TODO enable error handling
         match record.unwrap() {
             BotEvent::GameStart(game) => {
-                let event_path = game.id.as_ref().map(game_event_path);
+                let game_id = game.id.clone();
                 bot.on_game_start(game, client).await;
 
-                if let Some(event_path) = event_path {
+                if let Some(game_id) = game_id {
+                    let event_path = game_event_path(&game_id);
+
                     // TODO enable error handling
                     if let Ok(response) = client.send_request(Method::GET, &event_path).await {
                         let stream =
                             ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
                                 response.bytes_stream(), ndjson_config());
 
-                        run_with_game_event_stream(&bot, stream, client).await
+                        run_with_game_event_stream(&bot, stream, client, game_id).await
                     }
                 }
             },
@@ -155,19 +161,20 @@ mod tests {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
         }
 
-        async fn on_game_full(&self, game_full: GameFullEvent, _: &BotClient) {
+        async fn on_game_full(&self, _: GameId, game_full: GameFullEvent, _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::GameFull(game_full))
         }
 
-        async fn on_game_state(&self, state: GameStateEvent, _: &BotClient) {
+        async fn on_game_state(&self, _: GameId, state: GameStateEvent, _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::GameState(state))
         }
 
-        async fn on_chat_line(&self, chat_line: ChatLineEvent, _: &BotClient) {
+        async fn on_chat_line(&self, _: GameId, chat_line: ChatLineEvent, _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::ChatLine(chat_line))
         }
 
-        async fn on_opponent_gone(&self, opponent_gone: OpponentGoneEvent, _: &BotClient) {
+        async fn on_opponent_gone(&self, _: GameId, opponent_gone: OpponentGoneEvent,
+                _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::OpponentGone(opponent_gone))
         }
     }

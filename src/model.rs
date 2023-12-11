@@ -3,10 +3,13 @@ use serde::de::Error as DeserializeError;
 
 use thiserror::Error;
 
+// TODO avoid expensive clone with IDs?
+
 pub type GameId = String;
 pub type UserId = String;
 pub type TournamentId = String;
 pub type Fen = String;
+pub type Move = String;
 pub type Moves = String;
 pub type Rating = i32;
 pub type Milliseconds = i64;

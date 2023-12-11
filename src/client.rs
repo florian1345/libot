@@ -1,5 +1,5 @@
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
-use crate::model::{DeclineReason, DeclineRequest, GameId};
+use crate::model::{DeclineReason, DeclineRequest, GameId, Move};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
 use reqwest::header::{AUTHORIZATION, HeaderMap};
@@ -43,6 +43,13 @@ impl BotClient {
         Ok(self.client.request(method, url).body(body).send().await?)
     }
 
+    pub(crate) async fn send_request_with_query(&self, method: Method, path: &str,
+            query: impl Serialize) -> LibotResult<Response> {
+        let url = join_url(&self.base_url, path);
+
+        Ok(self.client.request(method, url).query(&query).send().await?)
+    }
+
     pub async fn accept_challenge(&self, challenge_id: GameId) -> LibotResult<()> {
         // TODO error handling
         let path = format!("/challenge/{challenge_id}/accept");
@@ -59,6 +66,22 @@ impl BotClient {
             reason
         };
         self.send_request_with_body(Method::POST, &path, body).await?;
+
+        Ok(())
+    }
+
+    pub async fn make_move(&self, game_id: GameId, mov: Move, offer_draw: bool) -> LibotResult<()> {
+        #[derive(Serialize)]
+        struct OfferDraw {
+            #[serde(rename = "offeringDraw")]
+            offer_draw: bool
+        }
+
+        // TODO error handling
+        let path = format!("/bot/game/{game_id}/move/{mov}");
+        let query = OfferDraw { offer_draw };
+
+        self.send_request_with_query(Method::POST, &path, query).await?;
 
         Ok(())
     }
@@ -120,8 +143,9 @@ mod tests {
     use super::*;
 
     use kernal::prelude::*;
+    use rstest::rstest;
     use wiremock::{Mock, ResponseTemplate};
-    use wiremock::matchers::{body_json_string, method, path};
+    use wiremock::matchers::{body_json_string, method, path, query_param};
     use crate::test_util;
 
     #[test]
@@ -254,6 +278,28 @@ mod tests {
 
             let result = client.decline_challenge(
                 "testChallengeId".to_owned(), Some(DeclineReason::Generic)).await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[rstest]
+    #[case(false)]
+    #[case(true)]
+    fn make_move(#[case] offer_draw: bool) {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/move/testMove"))
+                .and(query_param("offeringDraw", offer_draw.to_string()))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result =
+                client.make_move("testGameId".to_owned(), "testMove".to_owned(), offer_draw).await;
 
             assert_that!(result).is_ok();
         });
