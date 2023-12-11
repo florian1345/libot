@@ -515,6 +515,7 @@ pub struct OpponentGoneEvent {
     pub claim_win_in_seconds: Option<Seconds>
 }
 
+#[allow(clippy::large_enum_variant)] // TODO resolve this somehow
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GameEvent {
