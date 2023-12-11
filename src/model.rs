@@ -5,10 +5,15 @@ use thiserror::Error;
 
 pub type GameId = String;
 pub type UserId = String;
+pub type TournamentId = String;
 pub type Fen = String;
+pub type Moves = String;
 pub type Rating = i32;
+pub type Milliseconds = i64;
 pub type Seconds = i32;
 pub type Days = i32;
+pub type Timestamp = i64;
+pub type AiLevel = i32;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +34,8 @@ pub enum GameEventSource {
     Swiss
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum GameStatus {
     Created,
     Started,
@@ -39,6 +45,8 @@ pub enum GameStatus {
     Stalemate,
     Timeout,
     Draw,
+
+    #[serde(rename = "outoftime")]
     OutOfTime,
     Cheat,
     NoStart,
@@ -123,7 +131,8 @@ impl TryFrom<GameStatusObject> for Option<GameStatus> {
     }
 }
 
-fn deserialize_game_status<'de, D>(deserializer: D) -> Result<Option<GameStatus>, D::Error>
+fn deserialize_game_status_from_object<'de, D>(deserializer: D)
+    -> Result<Option<GameStatus>, D::Error>
 where
     D: Deserializer<'de>
 {
@@ -138,7 +147,7 @@ where
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub enum Player {
+pub enum Color {
     White,
     Black
 }
@@ -151,14 +160,14 @@ pub struct Compat {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-pub struct GameEventInfo {
+pub struct GameStartFinishEvent {
     // TODO really so many options?
     pub id: Option<GameId>,
     pub source: Option<GameEventSource>,
 
-    #[serde(default, deserialize_with = "deserialize_game_status")]
+    #[serde(default, deserialize_with = "deserialize_game_status_from_object")]
     pub status: Option<GameStatus>,
-    pub winner: Option<Player>,
+    pub winner: Option<Color>,
     pub compat: Option<Compat>
 }
 
@@ -247,13 +256,16 @@ pub enum Speed {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct Clock {
+    // TODO really optional?
+    pub limit: Option<Seconds>,
+    pub increment: Option<Seconds>
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TimeControl {
-    Clock {
-        // TODO really optional?
-        limit: Option<Seconds>,
-        increment: Option<Seconds>
-    },
+    Clock(Clock),
     #[serde(rename_all = "camelCase")]
     Correspondence {
         // TODO really optional?
@@ -324,13 +336,14 @@ pub enum DeclineReason {
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Challenge {
+pub struct ChallengeEvent {
     pub id: GameId,
     pub url: String,
     pub status: ChallengeStatus,
     pub challenger: User,
     pub dest_user: Option<User>,
 
+    // TODO really optional?
     #[serde(deserialize_with = "deserialize_optional_variant")]
     pub variant: Option<Variant>,
     pub rated: bool,
@@ -345,17 +358,49 @@ pub struct Challenge {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-pub struct ChallengeDeclined {
+pub struct ChallengeDeclinedEvent {
     pub id: GameId
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Event {
-    GameStart(GameEventInfo),
-    GameFinish(GameEventInfo),
-    Challenge(Challenge),
-    ChallengeCanceled(Challenge),
-    ChallengeDeclined(ChallengeDeclined)
+pub enum BotEvent {
+    GameStart(GameStartFinishEvent),
+    GameFinish(GameStartFinishEvent),
+    Challenge(ChallengeEvent),
+    ChallengeCanceled(ChallengeEvent),
+    ChallengeDeclined(ChallengeDeclinedEvent)
+}
+
+impl<'de> Deserialize<'de> for BotEvent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "camelCase")]
+        enum Wrapper {
+            GameStart {
+                game: GameStartFinishEvent
+            },
+            GameFinish {
+                game: GameStartFinishEvent
+            },
+            Challenge {
+                challenge: ChallengeEvent
+            },
+            ChallengeCanceled {
+                challenge: ChallengeEvent
+            },
+            ChallengeDeclined {
+                challenge: ChallengeDeclinedEvent
+            }
+        }
+
+        Ok(match Wrapper::deserialize(deserializer)? {
+            Wrapper::GameStart { game } => BotEvent::GameStart(game),
+            Wrapper::GameFinish { game } => BotEvent::GameFinish(game),
+            Wrapper::Challenge { challenge } => BotEvent::Challenge(challenge),
+            Wrapper::ChallengeCanceled { challenge } => BotEvent::ChallengeCanceled(challenge),
+            Wrapper::ChallengeDeclined { challenge } => BotEvent::ChallengeDeclined(challenge)
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -365,36 +410,127 @@ pub(crate) struct DeclineRequest {
     pub(crate) reason: Option<DeclineReason>
 }
 
-impl<'de> Deserialize<'de> for Event {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(tag = "type", rename_all = "camelCase")]
-        enum Wrapper {
-            GameStart {
-                game: GameEventInfo
-            },
-            GameFinish {
-                game: GameEventInfo
-            },
-            Challenge {
-                challenge: Challenge
-            },
-            ChallengeCanceled {
-                challenge: Challenge
-            },
-            ChallengeDeclined {
-                challenge: ChallengeDeclined
-            }
-        }
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct GamePerf {
 
-        Ok(match Wrapper::deserialize(deserializer)? {
-            Wrapper::GameStart { game } => Event::GameStart(game),
-            Wrapper::GameFinish { game } => Event::GameFinish(game),
-            Wrapper::Challenge { challenge } => Event::Challenge(challenge),
-            Wrapper::ChallengeCanceled { challenge } => Event::ChallengeCanceled(challenge),
-            Wrapper::ChallengeDeclined { challenge } => Event::ChallengeDeclined(challenge)
-        })
-    }
+    /// Translated perf name (e.g. "Classical" or "Blitz").
+    pub name: Option<String>
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameEventPlayer {
+    // TODO really everything optional?
+    pub ai_level: Option<AiLevel>,
+    pub id: Option<UserId>,
+    pub name: Option<String>,
+    pub title: Option<Title>,
+    pub rating: Option<Rating>,
+    pub provisional: Option<bool>
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct GameStateEvent {
+
+    /// Current moves in UCI format.
+    pub moves: String,
+
+    /// Integer of milliseconds White has left on the clock.
+    #[serde(rename = "wtime")]
+    pub white_time: Milliseconds,
+
+    /// Integer of milliseconds Black has left on the clock.
+    #[serde(rename = "btime")]
+    pub black_time: Milliseconds,
+
+    // TODO milliseconds correct?
+
+    /// Integer of White Fisher increment.
+    #[serde(rename = "winc")]
+    pub white_increment: Milliseconds,
+
+    /// Integer of Black Fisher increment.
+    #[serde(rename = "binc")]
+    pub black_increment: Milliseconds,
+    pub status: GameStatus,
+
+    /// Color of the winner, if any.
+    pub winner: Option<Color>,
+
+    /// True if and only if White is offering a draw.
+    #[serde(rename = "wdraw", default)]
+    pub white_draw_offer: bool,
+
+    /// True if and only if Black is offering a draw.
+    #[serde(rename = "bdraw", default)]
+    pub black_draw_offer: bool,
+
+    /// True if and only if White is proposing a take-back.
+    #[serde(rename = "wtakeback", default)]
+    pub white_take_back_proposal: bool,
+
+    /// True if and only if Black is proposing a take-back.
+    #[serde(rename = "btakeback", default)]
+    pub black_take_back_proposal: bool
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameFullEvent {
+    pub id: GameId,
+
+    // TODO really optional?
+    #[serde(deserialize_with = "deserialize_optional_variant")]
+    pub variant: Option<Variant>,
+    pub clock: Option<Clock>,
+    pub speed: Speed,
+    pub perf: GamePerf,
+    pub rated: bool,
+    pub created_at: Timestamp,
+    pub white: GameEventPlayer,
+    pub black: GameEventPlayer,
+    pub initial_fen: Fen,
+    pub state: GameStateEvent,
+    pub tournament_id: Option<TournamentId>
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ChatRoom {
+    Player,
+    Spectator
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct ChatLineEvent {
+    pub room: ChatRoom,
+    pub username: String,
+    pub text: String
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpponentGoneEvent {
+    pub gone: bool,
+    pub claim_win_in_seconds: Option<Seconds>
+}
+
+#[allow(clippy::large_enum_variant)] // TODO resolve this somehow
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GameEvent {
+
+    /// Full game data. All values are immutable, except for the `state` field.
+    GameFull(GameFullEvent),
+
+    /// Current state of the game. Immutable values not included.
+    GameState(GameStateEvent),
+
+    /// Chat message sent by a user (or the bot itself) in the `room` "player" or "spectator".
+    ChatLine(ChatLineEvent),
+
+    /// Whether the opponent has left the game, and how long before you can claim a win or draw.
+    OpponentGone(OpponentGoneEvent)
 }
 
 #[cfg(test)]
@@ -410,7 +546,7 @@ mod tests {
 
     fn parse_game_status(json: &str) -> JsonResult<Option<GameStatus>> {
         let mut deserializer = JsonDeserializer::from_str(&json);
-        deserialize_game_status(&mut deserializer)
+        deserialize_game_status_from_object(&mut deserializer)
     }
 
     #[rstest]
@@ -522,7 +658,7 @@ mod tests {
             "type": "gameStart",
             "game": { }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: None,
             source: None,
             status: None,
@@ -537,7 +673,7 @@ mod tests {
                 "id": "test"
             }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: Some("test".to_owned()),
             source: None,
             status: None,
@@ -552,7 +688,7 @@ mod tests {
                 "source": "friend"
             }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: None,
             source: Some(GameEventSource::Friend),
             status: None,
@@ -570,7 +706,7 @@ mod tests {
                 }
             }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: None,
             source: None,
             status: Some(GameStatus::Created),
@@ -585,11 +721,11 @@ mod tests {
                 "winner": "white"
             }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: None,
             source: None,
             status: None,
-            winner: Some(Player::White),
+            winner: Some(Color::White),
             compat: None
         })
     )]
@@ -600,7 +736,7 @@ mod tests {
                 "compat": { }
             }
         }"#,
-        Event::GameStart(GameEventInfo {
+        BotEvent::GameStart(GameStartFinishEvent {
             id: None,
             source: None,
             status: None,
@@ -621,7 +757,7 @@ mod tests {
                 }
             }
         }"#,
-        Event::GameFinish(GameEventInfo {
+        BotEvent::GameFinish(GameStartFinishEvent {
             id: None,
             source: None,
             status: None,
@@ -654,7 +790,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::Challenge(Challenge {
+        BotEvent::Challenge(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -710,7 +846,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::Challenge(Challenge {
+        BotEvent::Challenge(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -764,7 +900,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::Challenge(Challenge {
+        BotEvent::Challenge(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -826,7 +962,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::Challenge(Challenge {
+        BotEvent::Challenge(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -871,7 +1007,7 @@ mod tests {
                 }
             }
         }"#,
-        Event::Challenge(Challenge {
+        BotEvent::Challenge(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -917,7 +1053,7 @@ mod tests {
                 "declineReasonKey": "noBot"
             }
         }"#,
-        Event::ChallengeCanceled(Challenge {
+        BotEvent::ChallengeCanceled(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -962,7 +1098,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::ChallengeCanceled(Challenge {
+        BotEvent::ChallengeCanceled(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -971,10 +1107,10 @@ mod tests {
             variant: None,
             rated: true,
             speed: Speed::Blitz,
-            time_control: TimeControl::Clock {
+            time_control: TimeControl::Clock(Clock {
                 limit: Some(300),
                 increment: Some(3)
-            },
+            }),
             color: ChallengeColor::Black,
             perf: ChallengePerf {
                 icon: None,
@@ -1008,7 +1144,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        Event::ChallengeCanceled(Challenge {
+        BotEvent::ChallengeCanceled(ChallengeEvent {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -1038,11 +1174,11 @@ mod tests {
                 "id": "testId"
             }
         }"#,
-        Event::ChallengeDeclined(ChallengeDeclined {
+        BotEvent::ChallengeDeclined(ChallengeDeclinedEvent {
             id: "testId".to_owned()
         })
     )]
-    fn parse_event(#[case] json: &str, #[case] expected_event: Event) {
+    fn parse_bot_event(#[case] json: &str, #[case] expected_event: BotEvent) {
         let event = serde_json::from_str(json).unwrap();
 
         assert_that!(event).is_equal_to(expected_event);
@@ -1080,5 +1216,497 @@ mod tests {
         let serialized = serde_json::to_string(&decline_request).unwrap();
 
         assert_that!(serialized).is_equal_to(expected_json.to_owned());
+    }
+
+    fn empty_game_event_player() -> GameEventPlayer {
+        GameEventPlayer {
+            ai_level: None,
+            id: None,
+            name: None,
+            title: None,
+            rating: None,
+            provisional: None
+        }
+    }
+
+    fn minimal_game_state_event() -> GameStateEvent {
+        GameStateEvent {
+            moves: "testMoves".to_owned(),
+            white_time: 100,
+            black_time: 200,
+            white_increment: 1,
+            black_increment: 2,
+            status: GameStatus::Created,
+            winner: None,
+            white_draw_offer: false,
+            black_draw_offer: false,
+            white_take_back_proposal: false,
+            black_take_back_proposal: false
+        }
+    }
+
+    #[rstest]
+    #[case::minimal_game_full(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": null,
+            "speed": "blitz",
+            "perf": { },
+            "rated": true,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: None,
+            speed: Speed::Blitz,
+            perf: GamePerf {
+                name: None
+            },
+            rated: true,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_variant(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": {
+                "key": "crazyhouse",
+                "name": "Crazyhouse",
+                "short": "CH"
+            },
+            "clock": null,
+            "speed": "rapid",
+            "perf": { },
+            "rated": false,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: Some(Variant::Crazyhouse),
+            clock: None,
+            speed: Speed::Rapid,
+            perf: GamePerf {
+                name: None
+            },
+            rated: false,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_empty_clock(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": { },
+            "speed": "classical",
+            "perf": { },
+            "rated": true,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: Some(Clock {
+                limit: None,
+                increment: None
+            }),
+            speed: Speed::Classical,
+            perf: GamePerf {
+                name: None
+            },
+            rated: true,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_full_clock(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": {
+                "limit": 60,
+                "increment": 1
+            },
+            "speed": "bullet",
+            "perf": { },
+            "rated": true,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: Some(Clock {
+                limit: Some(60),
+                increment: Some(1)
+            }),
+            speed: Speed::Bullet,
+            perf: GamePerf {
+                name: None
+            },
+            rated: true,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_perf(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": null,
+            "speed": "ultraBullet",
+            "perf": {
+                "name": "testPerfName"
+            },
+            "rated": true,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: None,
+            speed: Speed::UltraBullet,
+            perf: GamePerf {
+                name: Some("testPerfName".to_owned())
+            },
+            rated: true,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_players(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": null,
+            "speed": "blitz",
+            "perf": { },
+            "rated": true,
+            "createdAt": 1234,
+            "white": {
+                "aiLevel": 5,
+                "id": "testWhiteId",
+                "name": "testWhiteName",
+                "title": null,
+                "rating": 2000,
+                "provisional": true
+            },
+            "black": {
+                "id": "testBlackId",
+                "name": "testBlackName",
+                "title": "IM",
+                "rating": 2145,
+                "provisional": false
+            },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            }
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: None,
+            speed: Speed::Blitz,
+            perf: GamePerf {
+                name: None
+            },
+            rated: true,
+            created_at: 1234,
+            white: GameEventPlayer {
+                ai_level: Some(5),
+                id: Some("testWhiteId".to_owned()),
+                name: Some("testWhiteName".to_owned()),
+                title: None,
+                rating: Some(2000),
+                provisional: Some(true)
+            },
+            black: GameEventPlayer {
+                ai_level: None,
+                id: Some("testBlackId".to_owned()),
+                name: Some("testBlackName".to_owned()),
+                title: Some(Title::Im),
+                rating: Some(2145),
+                provisional: Some(false)
+            },
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: None
+        })
+    )]
+    #[case::game_full_with_tournament_id(
+        r#"{
+            "type": "gameFull",
+            "id": "testId",
+            "variant": { },
+            "clock": null,
+            "speed": "correspondence",
+            "perf": { },
+            "rated": false,
+            "createdAt": 1234,
+            "white": { },
+            "black": { },
+            "initialFen": "testInitialFen",
+            "state": {
+                "type": "gameState",
+                "moves": "testMoves",
+                "wtime": 100,
+                "btime": 200,
+                "winc": 1,
+                "binc": 2,
+                "status": "created"
+            },
+            "tournamentId": "testTournamentId"
+        }"#,
+        GameEvent::GameFull(GameFullEvent {
+            id: "testId".to_owned(),
+            variant: None,
+            clock: None,
+            speed: Speed::Correspondence,
+            perf: GamePerf {
+                name: None
+            },
+            rated: false,
+            created_at: 1234,
+            white: empty_game_event_player(),
+            black: empty_game_event_player(),
+            initial_fen: "testInitialFen".to_owned(),
+            state: minimal_game_state_event(),
+            tournament_id: Some("testTournamentId".to_owned())
+        })
+    )]
+    #[case::minimal_game_state(
+        r#"{
+            "type": "gameState",
+            "moves": "testMoves",
+            "wtime": 15000,
+            "btime": 19000,
+            "winc": 1000,
+            "binc": 1500,
+            "status": "started"
+        }"#,
+        GameEvent::GameState(GameStateEvent {
+            moves: "testMoves".to_owned(),
+            white_time: 15000,
+            black_time: 19000,
+            white_increment: 1000,
+            black_increment: 1500,
+            status: GameStatus::Started,
+            winner: None,
+            white_draw_offer: false,
+            black_draw_offer: false,
+            white_take_back_proposal: false,
+            black_take_back_proposal: false
+        })
+    )]
+    #[case::game_state_with_winner(
+        r#"{
+            "type": "gameState",
+            "moves": "testMoves",
+            "wtime": 15000,
+            "btime": 19000,
+            "winc": 1000,
+            "binc": 1500,
+            "status": "mate",
+            "winner": "black"
+        }"#,
+        GameEvent::GameState(GameStateEvent {
+            moves: "testMoves".to_owned(),
+            white_time: 15000,
+            black_time: 19000,
+            white_increment: 1000,
+            black_increment: 1500,
+            status: GameStatus::Mate,
+            winner: Some(Color::Black),
+            white_draw_offer: false,
+            black_draw_offer: false,
+            white_take_back_proposal: false,
+            black_take_back_proposal: false
+        })
+    )]
+    #[case::game_state_with_draw_offers(
+        r#"{
+            "type": "gameState",
+            "moves": "testMoves",
+            "wtime": 15000,
+            "btime": 19000,
+            "winc": 1000,
+            "binc": 1500,
+            "status": "draw",
+            "wdraw": true,
+            "bdraw": true
+        }"#,
+        GameEvent::GameState(GameStateEvent {
+            moves: "testMoves".to_owned(),
+            white_time: 15000,
+            black_time: 19000,
+            white_increment: 1000,
+            black_increment: 1500,
+            status: GameStatus::Draw,
+            winner: None,
+            white_draw_offer: true,
+            black_draw_offer: true,
+            white_take_back_proposal: false,
+            black_take_back_proposal: false
+        })
+    )]
+    #[case::game_state_with_draw_takebacks(
+        r#"{
+            "type": "gameState",
+            "moves": "testMoves",
+            "wtime": 15000,
+            "btime": 19000,
+            "winc": 1000,
+            "binc": 1500,
+            "status": "draw",
+            "wtakeback": true,
+            "btakeback": true
+        }"#,
+        GameEvent::GameState(GameStateEvent {
+            moves: "testMoves".to_owned(),
+            white_time: 15000,
+            black_time: 19000,
+            white_increment: 1000,
+            black_increment: 1500,
+            status: GameStatus::Draw,
+            winner: None,
+            white_draw_offer: false,
+            black_draw_offer: false,
+            white_take_back_proposal: true,
+            black_take_back_proposal: true
+        })
+    )]
+    #[case::chat_line(
+        r#"{
+            "type": "chatLine",
+            "room": "spectator",
+            "username": "testUsername",
+            "text": "testText"
+        }"#,
+        GameEvent::ChatLine(ChatLineEvent {
+            room: ChatRoom::Spectator,
+            username: "testUsername".to_owned(),
+            text: "testText".to_owned()
+        })
+    )]
+    #[case::minimal_opponent_gone(
+        r#"{
+            "type": "opponentGone",
+            "gone": false
+        }"#,
+        GameEvent::OpponentGone(OpponentGoneEvent {
+            gone: false,
+            claim_win_in_seconds: None
+        })
+    )]
+    #[case::opponent_gone_with_claim_win_in_seconds(
+        r#"{
+            "type": "opponentGone",
+            "gone": false,
+            "claimWinInSeconds": 15
+        }"#,
+        GameEvent::OpponentGone(OpponentGoneEvent {
+            gone: false,
+            claim_win_in_seconds: Some(15)
+        })
+    )]
+    fn parse_game_event(#[case] json: &str, #[case] expected_event: GameEvent) {
+        let event = serde_json::from_str(json).unwrap();
+
+        assert_that!(event).is_equal_to(expected_event);
     }
 }

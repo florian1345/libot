@@ -9,42 +9,89 @@ use reqwest::Method;
 
 use crate::client::BotClient;
 use crate::error::LibotResult;
-use crate::model::{Challenge, ChallengeDeclined, Event, GameEventInfo};
+use crate::model::{ChallengeEvent, ChallengeDeclinedEvent, BotEvent, GameStartFinishEvent, GameId, GameFullEvent, GameStateEvent, ChatLineEvent, OpponentGoneEvent, GameEvent};
 
 pub mod model;
 pub mod error;
 pub mod client;
 
+#[cfg(test)]
+pub(crate) mod test_util;
+
 #[async_trait::async_trait]
-pub trait Bot {
+pub trait Bot : Sync {
 
-    async fn on_game_start(&self, game: GameEventInfo, client: &BotClient);
+    async fn on_game_start(&self, _game: GameStartFinishEvent, _client: &BotClient) { }
 
-    async fn on_game_finish(&self, game: GameEventInfo, client: &BotClient);
+    async fn on_game_finish(&self, _game: GameStartFinishEvent, _client: &BotClient) { }
 
-    async fn on_challenge(&self, challenge: Challenge, client: &BotClient);
+    async fn on_challenge(&self, _challenge: ChallengeEvent, _client: &BotClient) { }
 
-    async fn on_challenge_cancelled(&self, challenge: Challenge, client: &BotClient);
+    async fn on_challenge_cancelled(&self, _challenge: ChallengeEvent, _client: &BotClient) { }
 
-    async fn on_challenge_declined(&self, challenge: ChallengeDeclined, client: &BotClient);
+    async fn on_challenge_declined(&self, _challenge: ChallengeDeclinedEvent, _client: &BotClient)
+        { }
+
+    async fn on_game_full(&self, _game_full: GameFullEvent, _client: &BotClient) { }
+
+    async fn on_game_state(&self, _state: GameStateEvent, _client: &BotClient) { }
+
+    async fn on_chat_line(&self, _chat_line: ChatLineEvent, _client: &BotClient) { }
+
+    async fn on_opponent_gone(&self, _opponent_gone: OpponentGoneEvent, _client: &BotClient) { }
 }
 
 const EVENT_PATH: &str = "/stream/event";
 
-async fn run_with_event_stream<E>(bot: impl Bot, event_stream: impl Stream<Item = Result<Event, E>>,
-    client: &BotClient)
+fn game_event_path(game_id: &GameId) -> String {
+    format!("/bot/game/stream/{}", game_id)
+}
+
+async fn run_with_game_event_stream<E>(bot: &impl Bot,
+    event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient)
 where
     E: Debug
 {
     event_stream.for_each(|record| async {
         // TODO enable error handling
         match record.unwrap() {
-            Event::GameStart(game) => bot.on_game_start(game, client).await,
-            Event::GameFinish(game) => bot.on_game_finish(game, client).await,
-            Event::Challenge(challenge) => bot.on_challenge(challenge, client).await,
-            Event::ChallengeCanceled(challenge) =>
+            GameEvent::GameFull(game_full) => bot.on_game_full(game_full, client).await,
+            GameEvent::GameState(state) => bot.on_game_state(state, client).await,
+            GameEvent::ChatLine(chat_line) => bot.on_chat_line(chat_line, client).await,
+            GameEvent::OpponentGone(opponent_gone) =>
+                bot.on_opponent_gone(opponent_gone, client).await,
+        }
+    }).await
+}
+
+async fn run_with_event_stream<E>(bot: impl Bot,
+    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: &BotClient)
+where
+    E: Debug
+{
+    event_stream.for_each_concurrent(None, |record| async {
+        // TODO enable error handling
+        match record.unwrap() {
+            BotEvent::GameStart(game) => {
+                let event_path = game.id.as_ref().map(game_event_path);
+                bot.on_game_start(game, client).await;
+
+                if let Some(event_path) = event_path {
+                    // TODO enable error handling
+                    if let Ok(response) = client.send_request(Method::GET, &event_path).await {
+                        let stream =
+                            ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
+                                response.bytes_stream(), ndjson_config());
+
+                        run_with_game_event_stream(&bot, stream, client).await
+                    }
+                }
+            },
+            BotEvent::GameFinish(game) => bot.on_game_finish(game, client).await,
+            BotEvent::Challenge(challenge) => bot.on_challenge(challenge, client).await,
+            BotEvent::ChallengeCanceled(challenge) =>
                 bot.on_challenge_cancelled(challenge, client).await,
-            Event::ChallengeDeclined(challenge) =>
+            BotEvent::ChallengeDeclined(challenge) =>
                 bot.on_challenge_declined(challenge, client).await
         }
     }).await
@@ -52,14 +99,17 @@ where
 
 pub async fn run(bot: impl Bot, client: BotClient) -> LibotResult<()> {
     let response = client.send_request(Method::GET, EVENT_PATH).await?;
-    let ndjson_config = NdjsonConfig::default()
-        .with_empty_line_handling(EmptyLineHandling::IgnoreEmpty);
     let stream =
-        ndjson_stream::from_fallible_stream_with_config::<Event, _>(
-            response.bytes_stream(), ndjson_config);
+        ndjson_stream::from_fallible_stream_with_config::<BotEvent, _>(
+            response.bytes_stream(), ndjson_config());
 
     #[allow(clippy::unit_arg)]
     Ok(run_with_event_stream(bot, stream, &client).await)
+}
+
+fn ndjson_config() -> NdjsonConfig {
+    NdjsonConfig::default()
+        .with_empty_line_handling(EmptyLineHandling::IgnoreEmpty)
 }
 
 #[cfg(test)]
@@ -70,41 +120,71 @@ mod tests {
     use futures::stream;
     use kernal::prelude::*;
     use rstest::rstest;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
 
     use crate::client::BotClientBuilder;
-    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, Speed, TimeControl, User};
+    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, Speed, TimeControl, User};
 
     use super::*;
 
-    struct EventTrackingBot {
-        events: Arc<Mutex<Vec<Event>>>
+    struct MockBot {
+        bot_events: Arc<Mutex<Vec<BotEvent>>>,
+        game_events: Arc<Mutex<Vec<GameEvent>>>
     }
 
     #[async_trait::async_trait]
-    impl Bot for EventTrackingBot {
-        async fn on_game_start(&self, game: GameEventInfo, _: &BotClient) {
-            self.events.lock().unwrap().push(Event::GameStart(game));
+    impl Bot for MockBot {
+        async fn on_game_start(&self, game: GameStartFinishEvent, _: &BotClient) {
+            self.bot_events.lock().unwrap().push(BotEvent::GameStart(game));
         }
 
-        async fn on_game_finish(&self, game: GameEventInfo, _: &BotClient) {
-            self.events.lock().unwrap().push(Event::GameFinish(game));
+        async fn on_game_finish(&self, game: GameStartFinishEvent, _: &BotClient) {
+            self.bot_events.lock().unwrap().push(BotEvent::GameFinish(game));
         }
 
-        async fn on_challenge(&self, challenge: Challenge, _: &BotClient) {
-            self.events.lock().unwrap().push(Event::Challenge(challenge));
+        async fn on_challenge(&self, challenge: ChallengeEvent, _: &BotClient) {
+            self.bot_events.lock().unwrap().push(BotEvent::Challenge(challenge));
         }
 
-        async fn on_challenge_cancelled(&self, challenge: Challenge, _: &BotClient) {
-            self.events.lock().unwrap().push(Event::ChallengeCanceled(challenge));
+        async fn on_challenge_cancelled(&self, challenge: ChallengeEvent, _: &BotClient) {
+            self.bot_events.lock().unwrap().push(BotEvent::ChallengeCanceled(challenge));
         }
 
-        async fn on_challenge_declined(&self, challenge: ChallengeDeclined, _: &BotClient) {
-            self.events.lock().unwrap().push(Event::ChallengeDeclined(challenge));
+        async fn on_challenge_declined(&self, challenge: ChallengeDeclinedEvent, _: &BotClient) {
+            self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
+        }
+
+        async fn on_game_full(&self, game_full: GameFullEvent, _: &BotClient) {
+            self.game_events.lock().unwrap().push(GameEvent::GameFull(game_full))
+        }
+
+        async fn on_game_state(&self, state: GameStateEvent, _: &BotClient) {
+            self.game_events.lock().unwrap().push(GameEvent::GameState(state))
+        }
+
+        async fn on_chat_line(&self, chat_line: ChatLineEvent, _: &BotClient) {
+            self.game_events.lock().unwrap().push(GameEvent::ChatLine(chat_line))
+        }
+
+        async fn on_opponent_gone(&self, opponent_gone: OpponentGoneEvent, _: &BotClient) {
+            self.game_events.lock().unwrap().push(GameEvent::OpponentGone(opponent_gone))
         }
     }
 
-    fn test_game_event_info(id: &str) -> GameEventInfo {
-        GameEventInfo {
+    fn create_mock_bot() -> (MockBot, Arc<Mutex<Vec<BotEvent>>>, Arc<Mutex<Vec<GameEvent>>>) {
+        let bot_events = Arc::new(Mutex::new(Vec::new()));
+        let game_events = Arc::new(Mutex::new(Vec::new()));
+        let mock_bot = MockBot {
+            bot_events: Arc::clone(&bot_events),
+            game_events: Arc::clone(&game_events)
+        };
+
+        (mock_bot, bot_events, game_events)
+    }
+
+    fn test_game_event_info(id: &str) -> GameStartFinishEvent {
+        GameStartFinishEvent {
             id: Some(id.to_owned()),
             source: None,
             status: None,
@@ -113,8 +193,8 @@ mod tests {
         }
     }
 
-    fn test_challenge(id: &str) -> Challenge {
-        Challenge {
+    fn test_challenge(id: &str) -> ChallengeEvent {
+        ChallengeEvent {
             id: id.to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -147,32 +227,29 @@ mod tests {
     #[rstest]
     #[case::empty(vec![])]
     #[case::on_game_start(vec![
-        Event::GameStart(test_game_event_info("testGameStartId"))
+        BotEvent::GameStart(test_game_event_info("testGameStartId"))
     ])]
     #[case::on_game_finish(vec![
-        Event::GameFinish(test_game_event_info("testGameFinishId"))
+        BotEvent::GameFinish(test_game_event_info("testGameFinishId"))
     ])]
     #[case::challenge(vec![
-        Event::Challenge(test_challenge("testChallengeId"))
+        BotEvent::Challenge(test_challenge("testChallengeId"))
     ])]
     #[case::challenge_canceled(vec![
-        Event::ChallengeCanceled(test_challenge("testChallengeCanceledId"))
+        BotEvent::ChallengeCanceled(test_challenge("testChallengeCanceledId"))
     ])]
     #[case::challenge_declined(vec![
-        Event::ChallengeDeclined(ChallengeDeclined {
+        BotEvent::ChallengeDeclined(ChallengeDeclinedEvent {
             id: "testChallengeDeclined".to_owned()
         })
     ])]
     #[case::multiple_events(vec![
-        Event::GameStart(test_game_event_info("firstEventId")),
-        Event::Challenge(test_challenge("secondEventId")),
-        Event::GameStart(test_game_event_info("thirdEventId"))
+        BotEvent::GameStart(test_game_event_info("firstEventId")),
+        BotEvent::Challenge(test_challenge("secondEventId")),
+        BotEvent::GameStart(test_game_event_info("thirdEventId"))
     ])]
-    fn correct_events_are_called_on_bot(#[case] events: Vec<Event>) {
-        let tracked_events = Arc::new(Mutex::new(Vec::new()));
-        let bot = EventTrackingBot {
-            events: Arc::clone(&tracked_events)
-        };
+    fn correct_events_are_called_on_bot(#[case] events: Vec<BotEvent>) {
+        let (bot, tracked_events, _) = create_mock_bot();
         let event_results = events.iter()
             .cloned()
             .map(Ok)
@@ -185,5 +262,47 @@ mod tests {
         let tracked_events = tracked_events.lock().unwrap();
 
         assert_that!(tracked_events.deref()).contains_exactly_in_given_order(events);
+    }
+
+    #[test]
+    fn game_start_event_with_game_id_causes_query_of_game_event_stream() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+            let (bot, _, tracked_events) = create_mock_bot();
+
+            Mock::given(method("GET"))
+                .and(path("/bot/game/stream/testId"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string("{\
+                        \"type\": \"chatLine\",\
+                        \"room\": \"player\",\
+                        \"username\": \"testUserName\",\
+                        \"text\": \"testText\"\
+                    }\n"))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let stream = stream::once(async {
+                Ok::<_, &str>(BotEvent::GameStart(GameStartFinishEvent {
+                    id: Some("testId".to_owned()),
+                    source: None,
+                    status: None,
+                    winner: None,
+                    compat: None,
+                }))
+            });
+
+            run_with_event_stream(bot, stream, &client).await;
+
+            let tracked_events = tracked_events.lock().unwrap();
+            let expected_event = ChatLineEvent {
+                room: ChatRoom::Player,
+                username: "testUserName".to_string(),
+                text: "testText".to_string()
+            };
+
+            assert_that!(tracked_events.deref())
+                .contains_exactly_in_given_order([GameEvent::ChatLine(expected_event)]);
+        });
     }
 }

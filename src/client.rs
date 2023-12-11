@@ -120,8 +120,9 @@ mod tests {
     use super::*;
 
     use kernal::prelude::*;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-    use wiremock::matchers::{method, path, body_json_string};
+    use wiremock::{Mock, ResponseTemplate};
+    use wiremock::matchers::{body_json_string, method, path};
+    use crate::test_util;
 
     #[test]
     fn building_bot_client_fails_without_token() {
@@ -201,21 +202,10 @@ mod tests {
         assert_that!(url.as_str()).is_equal_to("https://lichess.org/api/bot/whatever");
     }
 
-    async fn setup_wiremock_test() -> (BotClient, MockServer) {
-        let server = MockServer::start().await;
-        let client = BotClientBuilder::new()
-            .with_token("mock_token")
-            .with_base_url(server.uri())
-            .build()
-            .unwrap();
-
-        (client, server)
-    }
-
     #[test]
     fn accept_challenge_success() {
         tokio_test::block_on(async {
-            let (client, server) = setup_wiremock_test().await;
+            let (client, server) = test_util::setup_wiremock_test().await;
 
             Mock::given(method("POST"))
                 .and(path("/challenge/testChallengeId/accept"))
@@ -233,7 +223,7 @@ mod tests {
     #[test]
     fn decline_challenge_success_without_reason() {
         tokio_test::block_on(async {
-            let (client, server) = setup_wiremock_test().await;
+            let (client, server) = test_util::setup_wiremock_test().await;
 
             Mock::given(method("POST"))
                 .and(path("/challenge/testChallengeId/decline"))
@@ -252,7 +242,7 @@ mod tests {
     #[test]
     fn decline_challenge_success_with_reason() {
         tokio_test::block_on(async {
-            let (client, server) = setup_wiremock_test().await;
+            let (client, server) = test_util::setup_wiremock_test().await;
 
             Mock::given(method("POST"))
                 .and(path("/challenge/testChallengeId/decline"))
