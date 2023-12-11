@@ -443,8 +443,6 @@ pub struct GameStateEvent {
     #[serde(rename = "btime")]
     pub black_time: Milliseconds,
 
-    // TODO milliseconds correct?
-
     /// Integer of White Fisher increment.
     #[serde(rename = "winc")]
     pub white_increment: Milliseconds,
