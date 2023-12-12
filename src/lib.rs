@@ -160,7 +160,15 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
 
     use crate::client::BotClientBuilder;
-    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, GameStatus, Speed, TimeControl, User};
+    use crate::model::{
+        ChallengeColor,
+        ChallengePerf,
+        ChallengeStatus,
+        GameStatus,
+        Speed,
+        TimeControl,
+        User
+    };
 
     use super::*;
 
