@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::pin::pin;
 
 use futures::Stream;
 use futures::stream::StreamExt;
@@ -9,7 +10,19 @@ use reqwest::Method;
 
 use crate::client::BotClient;
 use crate::error::LibotResult;
-use crate::model::{ChallengeEvent, ChallengeDeclinedEvent, BotEvent, GameStartFinishEvent, GameId, GameFullEvent, GameStateEvent, ChatLineEvent, OpponentGoneEvent, GameEvent};
+use crate::model::{
+    ChallengeEvent,
+    ChallengeDeclinedEvent,
+    BotEvent,
+    GameStartFinishEvent,
+    GameId,
+    GameStateEvent,
+    ChatLineEvent,
+    OpponentGoneEvent,
+    GameEvent,
+    GameContext,
+    UserId
+};
 
 pub mod model;
 pub mod error;
@@ -32,13 +45,13 @@ pub trait Bot : Sync {
     async fn on_challenge_declined(&self, _challenge: ChallengeDeclinedEvent, _client: &BotClient)
         { }
 
-    async fn on_game_full(&self, _id: GameId, _game_full: GameFullEvent, _client: &BotClient) { }
+    async fn on_game_state(&self, _context: &GameContext, _state: GameStateEvent,
+        _client: &BotClient) { }
 
-    async fn on_game_state(&self, _id: GameId, _state: GameStateEvent, _client: &BotClient) { }
+    async fn on_chat_line(&self, _context: &GameContext, _chat_line: ChatLineEvent,
+        _client: &BotClient) { }
 
-    async fn on_chat_line(&self, _id: GameId, _chat_line: ChatLineEvent, _client: &BotClient) { }
-
-    async fn on_opponent_gone(&self, _id: GameId, _opponent_gone: OpponentGoneEvent,
+    async fn on_opponent_gone(&self, _context: &GameContext, _opponent_gone: OpponentGoneEvent,
         _client: &BotClient) { }
 }
 
@@ -49,27 +62,43 @@ fn game_event_path(game_id: &GameId) -> String {
 }
 
 async fn run_with_game_event_stream<E>(bot: &impl Bot,
-    event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient, game_id: GameId)
+    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient, bot_id: &UserId)
 where
     E: Debug
 {
+    let game_context;
+    let mut event_stream = pin!(event_stream);
+
+    match event_stream.next().await {
+        Some(Ok(GameEvent::GameFull(game_full))) => {
+            game_context = Some(GameContext {
+                bot_color: None,
+                bot_id: bot_id.clone(),
+                info: game_full.info
+            });
+
+            bot.on_game_state(game_context.as_ref().unwrap(), game_full.state, client).await
+        },
+        Some(_) => panic!(), // TODO proper error handling
+        None => return
+    };
+
     event_stream.for_each(|record| async {
         // TODO enable error handling
         match record.unwrap() {
-            GameEvent::GameFull(game_full) =>
-                bot.on_game_full(game_id.clone(), game_full, client).await,
+            GameEvent::GameFull(_) => panic!(), // TODO proper error handling
             GameEvent::GameState(state) =>
-                bot.on_game_state(game_id.clone(), state, client).await,
+                bot.on_game_state(game_context.as_ref().unwrap(), state, client).await,
             GameEvent::ChatLine(chat_line) =>
-                bot.on_chat_line(game_id.clone(), chat_line, client).await,
+                bot.on_chat_line(game_context.as_ref().unwrap(), chat_line, client).await,
             GameEvent::OpponentGone(opponent_gone) =>
-                bot.on_opponent_gone(game_id.clone(), opponent_gone, client).await,
+                bot.on_opponent_gone(game_context.as_ref().unwrap(), opponent_gone, client).await,
         }
     }).await
 }
 
 async fn run_with_event_stream<E>(bot: impl Bot,
-    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: &BotClient)
+    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: &BotClient, bot_id: UserId)
 where
     E: Debug
 {
@@ -89,7 +118,7 @@ where
                             ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
                                 response.bytes_stream(), ndjson_config());
 
-                        run_with_game_event_stream(&bot, stream, client, game_id).await
+                        run_with_game_event_stream(&bot, stream, client, &bot_id).await
                     }
                 }
             },
@@ -104,13 +133,14 @@ where
 }
 
 pub async fn run(bot: impl Bot, client: BotClient) -> LibotResult<()> {
+    let bot_id = client.get_my_profile().await.unwrap().id;
     let response = client.send_request(Method::GET, EVENT_PATH).await?;
     let stream =
         ndjson_stream::from_fallible_stream_with_config::<BotEvent, _>(
             response.bytes_stream(), ndjson_config());
 
     #[allow(clippy::unit_arg)]
-    Ok(run_with_event_stream(bot, stream, &client).await)
+    Ok(run_with_event_stream(bot, stream, &client, bot_id).await)
 }
 
 fn ndjson_config() -> NdjsonConfig {
@@ -130,7 +160,7 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
 
     use crate::client::BotClientBuilder;
-    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, Speed, TimeControl, User};
+    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, GameStatus, Speed, TimeControl, User};
 
     use super::*;
 
@@ -161,19 +191,15 @@ mod tests {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
         }
 
-        async fn on_game_full(&self, _: GameId, game_full: GameFullEvent, _: &BotClient) {
-            self.game_events.lock().unwrap().push(GameEvent::GameFull(game_full))
-        }
-
-        async fn on_game_state(&self, _: GameId, state: GameStateEvent, _: &BotClient) {
+        async fn on_game_state(&self, _: &GameContext, state: GameStateEvent, _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::GameState(state))
         }
 
-        async fn on_chat_line(&self, _: GameId, chat_line: ChatLineEvent, _: &BotClient) {
+        async fn on_chat_line(&self, _: &GameContext, chat_line: ChatLineEvent, _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::ChatLine(chat_line))
         }
 
-        async fn on_opponent_gone(&self, _: GameId, opponent_gone: OpponentGoneEvent,
+        async fn on_opponent_gone(&self, _: &GameContext, opponent_gone: OpponentGoneEvent,
                 _: &BotClient) {
             self.game_events.lock().unwrap().push(GameEvent::OpponentGone(opponent_gone))
         }
@@ -264,7 +290,7 @@ mod tests {
         let stream = stream::iter(event_results);
         let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
 
-        tokio_test::block_on(run_with_event_stream(bot, stream, &mock_client));
+        tokio_test::block_on(run_with_event_stream(bot, stream, &mock_client, "testId".to_owned()));
 
         let tracked_events = tracked_events.lock().unwrap();
 
@@ -281,10 +307,26 @@ mod tests {
                 .and(path("/bot/game/stream/testId"))
                 .respond_with(ResponseTemplate::new(200)
                     .set_body_string("{\
-                        \"type\": \"chatLine\",\
-                        \"room\": \"player\",\
-                        \"username\": \"testUserName\",\
-                        \"text\": \"testText\"\
+                        \"type\": \"gameFull\",\
+                        \"id\": \"testId\",\
+                        \"variant\": { },\
+                        \"clock\": null,\
+                        \"speed\": \"blitz\",\
+                        \"perf\": { },\
+                        \"rated\": false,\
+                        \"createdAt\": 1234,\
+                        \"white\": { },\
+                        \"black\": { },\
+                        \"initialFen\": \"testInitialFen\",\
+                        \"state\": {\
+                            \"type\": \"gameState\",\
+                            \"moves\": \"\",\
+                            \"wtime\": 120000,\
+                            \"btime\": 120000,\
+                            \"winc\": 0,\
+                            \"binc\": 0,\
+                            \"status\": \"created\"\
+                        }\
                     }\n"))
                 .expect(1)
                 .mount(&server)
@@ -299,17 +341,25 @@ mod tests {
                 }))
             });
 
-            run_with_event_stream(bot, stream, &client).await;
+            run_with_event_stream(bot, stream, &client, "testId".to_owned()).await;
 
             let tracked_events = tracked_events.lock().unwrap();
-            let expected_event = ChatLineEvent {
-                room: ChatRoom::Player,
-                username: "testUserName".to_string(),
-                text: "testText".to_string()
+            let expected_event = GameStateEvent {
+                moves: "".to_string(),
+                white_time: 120000,
+                black_time: 120000,
+                white_increment: 0,
+                black_increment: 0,
+                status: GameStatus::Created,
+                winner: None,
+                white_draw_offer: false,
+                black_draw_offer: false,
+                white_take_back_proposal: false,
+                black_take_back_proposal: false,
             };
 
             assert_that!(tracked_events.deref())
-                .contains_exactly_in_given_order([GameEvent::ChatLine(expected_event)]);
+                .contains_exactly_in_given_order([GameEvent::GameState(expected_event)]);
         });
     }
 }

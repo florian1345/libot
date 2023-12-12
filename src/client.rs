@@ -1,5 +1,5 @@
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
-use crate::model::{DeclineReason, DeclineRequest, GameId, Move};
+use crate::model::{DeclineReason, DeclineRequest, GameId, Move, UserProfile};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
 use reqwest::header::{AUTHORIZATION, HeaderMap};
@@ -84,6 +84,10 @@ impl BotClient {
         self.send_request_with_query(Method::POST, &path, query).await?;
 
         Ok(())
+    }
+
+    pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
+        Ok(self.send_request(Method::GET, "/account").await?.json().await?)
     }
 }
 
