@@ -87,11 +87,11 @@ async fn process_game_event(event: GameEvent, game_context: &GameContext, bot: &
     match event {
         GameEvent::GameFull(_) => panic!(), // TODO proper error handling
         GameEvent::GameState(state) =>
-            bot.on_game_state(&game_context, state, client).await,
+            bot.on_game_state(game_context, state, client).await,
         GameEvent::ChatLine(chat_line) =>
-            bot.on_chat_line(&game_context, chat_line, client).await,
+            bot.on_chat_line(game_context, chat_line, client).await,
         GameEvent::OpponentGone(opponent_gone) =>
-            bot.on_opponent_gone(&game_context, opponent_gone, client).await,
+            bot.on_opponent_gone(game_context, opponent_gone, client).await,
     }
 }
 
@@ -127,10 +127,8 @@ where
         let game_context = Arc::clone(&game_context);
 
         task::spawn(async move {
-            let bot = bot.as_ref();
-            let client = client.as_ref();
-
-            process_game_event(record.unwrap(), game_context.as_ref(), bot, client).await;
+            process_game_event(
+                record.unwrap(), game_context.as_ref(), bot.as_ref(), client.as_ref()).await;
         })
     }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
 }
