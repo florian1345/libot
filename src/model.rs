@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde::de::Error as DeserializeError;
 
@@ -477,7 +478,7 @@ pub struct GameStateEvent {
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct GameFullEvent {
+pub struct GameInfo {
     pub id: GameId,
 
     // TODO really optional?
@@ -491,8 +492,15 @@ pub struct GameFullEvent {
     pub white: GameEventPlayer,
     pub black: GameEventPlayer,
     pub initial_fen: Fen,
-    pub state: GameStateEvent,
     pub tournament_id: Option<TournamentId>
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameFullEvent {
+    #[serde(flatten)]
+    pub info: GameInfo,
+    pub state: GameStateEvent
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -532,6 +540,33 @@ pub enum GameEvent {
 
     /// Whether the opponent has left the game, and how long before you can claim a win or draw.
     OpponentGone(OpponentGoneEvent)
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct GameContext {
+
+    /// The [Color] as which this bot plays, or [None] if it is not a participant.
+    pub bot_color: Option<Color>,
+
+    /// The [UserId] of this bot's user.
+    pub bot_id: UserId,
+
+    pub(crate) info: GameInfo
+}
+
+impl Deref for GameContext {
+
+    type Target = GameInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.info
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct UserProfile {
+    pub id: UserId,
+    pub username: String
 }
 
 #[cfg(test)]
@@ -1271,20 +1306,22 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: None,
-            speed: Speed::Blitz,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: None,
+                speed: Speed::Blitz,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: true,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None,
             },
-            rated: true,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: None
+            state: minimal_game_state_event()
         })
     )]
     #[case::game_full_with_variant(
@@ -1315,20 +1352,22 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: Some(Variant::Crazyhouse),
-            clock: None,
-            speed: Speed::Rapid,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: Some(Variant::Crazyhouse),
+                clock: None,
+                speed: Speed::Rapid,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: false,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None,
             },
-            rated: false,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: None
+            state: minimal_game_state_event()
         })
     )]
     #[case::game_full_with_empty_clock(
@@ -1355,23 +1394,25 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: Some(Clock {
-                limit: None,
-                increment: None
-            }),
-            speed: Speed::Classical,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: Some(Clock {
+                    limit: None,
+                    increment: None
+                }),
+                speed: Speed::Classical,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: true,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None,
             },
-            rated: true,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: None
+            state: minimal_game_state_event()
         })
     )]
     #[case::game_full_with_full_clock(
@@ -1401,23 +1442,25 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: Some(Clock {
-                limit: Some(60),
-                increment: Some(1)
-            }),
-            speed: Speed::Bullet,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: Some(Clock {
+                    limit: Some(60),
+                    increment: Some(1)
+                }),
+                speed: Speed::Bullet,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: true,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None
             },
-            rated: true,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: None
+            state: minimal_game_state_event()
         })
     )]
     #[case::game_full_with_perf(
@@ -1446,20 +1489,22 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: None,
-            speed: Speed::UltraBullet,
-            perf: GamePerf {
-                name: Some("testPerfName".to_owned())
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: None,
+                speed: Speed::UltraBullet,
+                perf: GamePerf {
+                    name: Some("testPerfName".to_owned())
+                },
+                rated: true,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None
             },
-            rated: true,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
             state: minimal_game_state_event(),
-            tournament_id: None
         })
     )]
     #[case::game_full_with_players(
@@ -1499,34 +1544,36 @@ mod tests {
             }
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: None,
-            speed: Speed::Blitz,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: None,
+                speed: Speed::Blitz,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: true,
+                created_at: 1234,
+                white: GameEventPlayer {
+                    ai_level: Some(5),
+                    id: Some("testWhiteId".to_owned()),
+                    name: Some("testWhiteName".to_owned()),
+                    title: None,
+                    rating: Some(2000),
+                    provisional: Some(true)
+                },
+                black: GameEventPlayer {
+                    ai_level: None,
+                    id: Some("testBlackId".to_owned()),
+                    name: Some("testBlackName".to_owned()),
+                    title: Some(Title::Im),
+                    rating: Some(2145),
+                    provisional: Some(false)
+                },
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: None
             },
-            rated: true,
-            created_at: 1234,
-            white: GameEventPlayer {
-                ai_level: Some(5),
-                id: Some("testWhiteId".to_owned()),
-                name: Some("testWhiteName".to_owned()),
-                title: None,
-                rating: Some(2000),
-                provisional: Some(true)
-            },
-            black: GameEventPlayer {
-                ai_level: None,
-                id: Some("testBlackId".to_owned()),
-                name: Some("testBlackName".to_owned()),
-                title: Some(Title::Im),
-                rating: Some(2145),
-                provisional: Some(false)
-            },
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: None
+            state: minimal_game_state_event()
         })
     )]
     #[case::game_full_with_tournament_id(
@@ -1554,20 +1601,22 @@ mod tests {
             "tournamentId": "testTournamentId"
         }"#,
         GameEvent::GameFull(GameFullEvent {
-            id: "testId".to_owned(),
-            variant: None,
-            clock: None,
-            speed: Speed::Correspondence,
-            perf: GamePerf {
-                name: None
+            info: GameInfo {
+                id: "testId".to_owned(),
+                variant: None,
+                clock: None,
+                speed: Speed::Correspondence,
+                perf: GamePerf {
+                    name: None
+                },
+                rated: false,
+                created_at: 1234,
+                white: empty_game_event_player(),
+                black: empty_game_event_player(),
+                initial_fen: "testInitialFen".to_owned(),
+                tournament_id: Some("testTournamentId".to_owned())
             },
-            rated: false,
-            created_at: 1234,
-            white: empty_game_event_player(),
-            black: empty_game_event_player(),
-            initial_fen: "testInitialFen".to_owned(),
-            state: minimal_game_state_event(),
-            tournament_id: Some("testTournamentId".to_owned())
+            state: minimal_game_state_event()
         })
     )]
     #[case::minimal_game_state(
