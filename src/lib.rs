@@ -10,19 +10,7 @@ use reqwest::Method;
 
 use crate::client::BotClient;
 use crate::error::LibotResult;
-use crate::model::{
-    ChallengeEvent,
-    ChallengeDeclinedEvent,
-    BotEvent,
-    GameStartFinishEvent,
-    GameId,
-    GameStateEvent,
-    ChatLineEvent,
-    OpponentGoneEvent,
-    GameEvent,
-    GameContext,
-    UserId
-};
+use crate::model::{ChallengeEvent, ChallengeDeclinedEvent, BotEvent, GameStartFinishEvent, GameId, GameStateEvent, ChatLineEvent, OpponentGoneEvent, GameEvent, GameContext, UserId, Color, GameInfo};
 
 pub mod model;
 pub mod error;
@@ -61,6 +49,21 @@ fn game_event_path(game_id: &GameId) -> String {
     format!("/bot/game/stream/{}", game_id)
 }
 
+fn color_of(user_id: &UserId, game_info: &GameInfo) -> Option<Color> {
+    let is_white = game_info.white.id.iter().any(|white| white == user_id);
+    let is_black = game_info.black.id.iter().any(|black| black == user_id);
+
+    if is_white {
+        Some(Color::White)
+    }
+    else if is_black {
+        Some(Color::Black)
+    }
+    else {
+        None
+    }
+}
+
 async fn run_with_game_event_stream<E>(bot: &impl Bot,
     mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient, bot_id: &UserId)
 where
@@ -71,8 +74,10 @@ where
 
     match event_stream.next().await {
         Some(Ok(GameEvent::GameFull(game_full))) => {
+            let bot_color = color_of(bot_id, &game_full.info);
+
             game_context = Some(GameContext {
-                bot_color: None,
+                bot_color,
                 bot_id: bot_id.clone(),
                 info: game_full.info
             });
