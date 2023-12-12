@@ -164,8 +164,7 @@ where
 
             process_bot_event(record.unwrap(), bot, client, bot_id).await;
         })
-    })
-        .collect::<Vec<_>>().await;
+    }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
 }
 
 pub async fn run(bot: impl Bot + Send + 'static, client: BotClient) -> LibotResult<()> {
