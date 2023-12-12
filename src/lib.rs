@@ -81,50 +81,65 @@ fn color_of(user_id: &UserId, game_info: &GameInfo) -> Option<Color> {
     }
 }
 
-async fn run_with_game_event_stream<E>(bot: &impl Bot,
-    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: &BotClient, bot_id: &UserId)
+async fn process_game_event(event: GameEvent, game_context: &GameContext, bot: &impl Bot,
+        client: &BotClient) {
+    // TODO enable error handling
+    match event {
+        GameEvent::GameFull(_) => panic!(), // TODO proper error handling
+        GameEvent::GameState(state) =>
+            bot.on_game_state(game_context, state, client).await,
+        GameEvent::ChatLine(chat_line) =>
+            bot.on_chat_line(game_context, chat_line, client).await,
+        GameEvent::OpponentGone(opponent_gone) =>
+            bot.on_opponent_gone(game_context, opponent_gone, client).await,
+    }
+}
+
+async fn run_with_game_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
+    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: Arc<BotClient>, bot_id: UserId)
 where
-    E: Debug
+    E: Debug + Send + 'static
 {
     let game_context;
     let mut event_stream = pin!(event_stream);
 
     match event_stream.next().await {
         Some(Ok(GameEvent::GameFull(game_full))) => {
-            let bot_color = color_of(bot_id, &game_full.info);
+            let bot_color = color_of(&bot_id, &game_full.info);
 
-            game_context = Some(GameContext {
+            game_context = GameContext {
                 bot_color,
                 bot_id: bot_id.clone(),
                 info: game_full.info
-            });
+            };
 
-            bot.on_game_state(game_context.as_ref().unwrap(), game_full.state, client).await
+            bot.on_game_state(&game_context, game_full.state, client.as_ref()).await
         },
         Some(_) => panic!(), // TODO proper error handling
         None => return
     };
 
-    event_stream.for_each(|record| async {
-        // TODO enable error handling
-        match record.unwrap() {
-            GameEvent::GameFull(_) => panic!(), // TODO proper error handling
-            GameEvent::GameState(state) =>
-                bot.on_game_state(game_context.as_ref().unwrap(), state, client).await,
-            GameEvent::ChatLine(chat_line) =>
-                bot.on_chat_line(game_context.as_ref().unwrap(), chat_line, client).await,
-            GameEvent::OpponentGone(opponent_gone) =>
-                bot.on_opponent_gone(game_context.as_ref().unwrap(), opponent_gone, client).await,
-        }
-    }).await
+    let game_context = Arc::new(game_context);
+
+    event_stream.map(|record| {
+        let bot = Arc::clone(&bot);
+        let client = Arc::clone(&client);
+        let game_context = Arc::clone(&game_context);
+
+        task::spawn(async move {
+            process_game_event(
+                record.unwrap(), game_context.as_ref(), bot.as_ref(), client.as_ref()).await;
+        })
+    }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
 }
 
-async fn process_bot_event(event: BotEvent, bot: &impl Bot, client: &BotClient, bot_id: UserId) {
+async fn process_bot_event(event: BotEvent, bot: Arc<impl Bot + Send + 'static>,
+        client: Arc<BotClient>, bot_id: UserId) {
     // TODO enable error handling
     match event {
         BotEvent::GameStart(game) => {
             let game_id = game.id.clone();
-            bot.on_game_start(game, client).await;
+            bot.as_ref().on_game_start(game, client.as_ref()).await;
 
             if let Some(game_id) = game_id {
                 let event_path = game_event_path(&game_id);
@@ -135,16 +150,18 @@ async fn process_bot_event(event: BotEvent, bot: &impl Bot, client: &BotClient, 
                         ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
                             response.bytes_stream(), ndjson_config());
 
-                    run_with_game_event_stream(bot, stream, client, &bot_id).await
+                    run_with_game_event_stream(bot, stream, client, bot_id).await
                 }
             }
         },
-        BotEvent::GameFinish(game) => bot.on_game_finish(game, client).await,
-        BotEvent::Challenge(challenge) => bot.on_challenge(challenge, client).await,
+        BotEvent::GameFinish(game) =>
+            bot.as_ref().on_game_finish(game, client.as_ref()).await,
+        BotEvent::Challenge(challenge) =>
+            bot.as_ref().on_challenge(challenge, client.as_ref()).await,
         BotEvent::ChallengeCanceled(challenge) =>
-            bot.on_challenge_cancelled(challenge, client).await,
+            bot.as_ref().on_challenge_cancelled(challenge, client.as_ref()).await,
         BotEvent::ChallengeDeclined(challenge) =>
-            bot.on_challenge_declined(challenge, client).await
+            bot.as_ref().on_challenge_declined(challenge, client.as_ref()).await
     }
 }
 
@@ -159,9 +176,6 @@ where
         let bot_id = bot_id.clone();
 
         task::spawn(async move {
-            let bot = bot.as_ref();
-            let client = client.as_ref();
-
             process_bot_event(record.unwrap(), bot, client, bot_id).await;
         })
     }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
