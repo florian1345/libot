@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::pin::pin;
+use std::sync::Arc;
 
 use futures::Stream;
 use futures::stream::StreamExt;
@@ -8,9 +9,25 @@ use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
 
 use reqwest::Method;
 
+use tokio::task;
+
 use crate::client::BotClient;
 use crate::error::LibotResult;
-use crate::model::{ChallengeEvent, ChallengeDeclinedEvent, BotEvent, GameStartFinishEvent, GameId, GameStateEvent, ChatLineEvent, OpponentGoneEvent, GameEvent, GameContext, UserId, Color, GameInfo};
+use crate::model::{
+    ChallengeEvent,
+    ChallengeDeclinedEvent,
+    BotEvent,
+    GameStartFinishEvent,
+    GameId,
+    GameStateEvent,
+    ChatLineEvent,
+    OpponentGoneEvent,
+    GameEvent,
+    GameContext,
+    UserId,
+    Color,
+    GameInfo
+};
 
 pub mod model;
 pub mod error;
@@ -102,50 +119,65 @@ where
     }).await
 }
 
-async fn run_with_event_stream<E>(bot: impl Bot,
-    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: &BotClient, bot_id: UserId)
-where
-    E: Debug
-{
-    event_stream.for_each_concurrent(None, |record| async {
-        // TODO enable error handling
-        match record.unwrap() {
-            BotEvent::GameStart(game) => {
-                let game_id = game.id.clone();
-                bot.on_game_start(game, client).await;
+async fn process_bot_event(event: BotEvent, bot: &impl Bot, client: &BotClient, bot_id: UserId) {
+    // TODO enable error handling
+    match event {
+        BotEvent::GameStart(game) => {
+            let game_id = game.id.clone();
+            bot.on_game_start(game, client).await;
 
-                if let Some(game_id) = game_id {
-                    let event_path = game_event_path(&game_id);
+            if let Some(game_id) = game_id {
+                let event_path = game_event_path(&game_id);
 
-                    // TODO enable error handling
-                    if let Ok(response) = client.send_request(Method::GET, &event_path).await {
-                        let stream =
-                            ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
-                                response.bytes_stream(), ndjson_config());
+                // TODO enable error handling
+                if let Ok(response) = client.send_request(Method::GET, &event_path).await {
+                    let stream =
+                        ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
+                            response.bytes_stream(), ndjson_config());
 
-                        run_with_game_event_stream(&bot, stream, client, &bot_id).await
-                    }
+                    run_with_game_event_stream(bot, stream, client, &bot_id).await
                 }
-            },
-            BotEvent::GameFinish(game) => bot.on_game_finish(game, client).await,
-            BotEvent::Challenge(challenge) => bot.on_challenge(challenge, client).await,
-            BotEvent::ChallengeCanceled(challenge) =>
-                bot.on_challenge_cancelled(challenge, client).await,
-            BotEvent::ChallengeDeclined(challenge) =>
-                bot.on_challenge_declined(challenge, client).await
-        }
-    }).await
+            }
+        },
+        BotEvent::GameFinish(game) => bot.on_game_finish(game, client).await,
+        BotEvent::Challenge(challenge) => bot.on_challenge(challenge, client).await,
+        BotEvent::ChallengeCanceled(challenge) =>
+            bot.on_challenge_cancelled(challenge, client).await,
+        BotEvent::ChallengeDeclined(challenge) =>
+            bot.on_challenge_declined(challenge, client).await
+    }
 }
 
-pub async fn run(bot: impl Bot, client: BotClient) -> LibotResult<()> {
+async fn run_with_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
+    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: Arc<BotClient>, bot_id: UserId)
+where
+    E: Debug + Send + 'static
+{
+    event_stream.map(|record| {
+        let bot = Arc::clone(&bot);
+        let client = Arc::clone(&client);
+        let bot_id = bot_id.clone();
+
+        task::spawn(async move {
+            let bot = bot.as_ref();
+            let client = client.as_ref();
+
+            process_bot_event(record.unwrap(), bot, client, bot_id).await;
+        })
+    }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
+}
+
+pub async fn run(bot: impl Bot + Send + 'static, client: BotClient) -> LibotResult<()> {
     let bot_id = client.get_my_profile().await.unwrap().id;
     let response = client.send_request(Method::GET, EVENT_PATH).await?;
     let stream =
         ndjson_stream::from_fallible_stream_with_config::<BotEvent, _>(
             response.bytes_stream(), ndjson_config());
+    let bot = Arc::new(bot);
+    let client = Arc::new(client);
 
     #[allow(clippy::unit_arg)]
-    Ok(run_with_event_stream(bot, stream, &client, bot_id).await)
+    Ok(run_with_event_stream(bot, stream, client, bot_id).await)
 }
 
 fn ndjson_config() -> NdjsonConfig {
@@ -303,7 +335,8 @@ mod tests {
         let stream = stream::iter(event_results);
         let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
 
-        tokio_test::block_on(run_with_event_stream(bot, stream, &mock_client, "testId".to_owned()));
+        tokio_test::block_on(run_with_event_stream(
+            Arc::new(bot), stream, Arc::new(mock_client), "testId".to_owned()));
 
         let tracked_events = tracked_events.lock().unwrap();
 
@@ -354,7 +387,8 @@ mod tests {
                 }))
             });
 
-            run_with_event_stream(bot, stream, &client, "testId".to_owned()).await;
+            run_with_event_stream(Arc::new(bot), stream, Arc::new(client), "testId".to_owned())
+                .await;
 
             let tracked_events = tracked_events.lock().unwrap();
             let expected_event = GameStateEvent {
