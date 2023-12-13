@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
-use crate::model::{DeclineReason, DeclineRequest, GameId, Move, UserProfile};
+use crate::model::{ChatRoom, DeclineReason, DeclineRequest, GameId, Move, SendChatMessageRequest, UserProfile};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
 use reqwest::header::{AUTHORIZATION, HeaderMap};
@@ -90,6 +90,20 @@ impl BotClient {
 
     pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
         Ok(self.send_request(Method::GET, "/account").await?.json().await?)
+    }
+
+    pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
+            -> LibotResult<()> {
+        // TODO error handling
+        let path = format!("/bot/game/{game_id}/chat");
+        let body = SendChatMessageRequest {
+            room,
+            text: text.into()
+        };
+
+        self.send_request_with_body(Method::POST, &path, body).await?;
+
+        Ok(())
     }
 }
 
@@ -306,6 +320,26 @@ mod tests {
 
             let result =
                 client.make_move("testGameId".to_owned(), "testMove".to_owned(), offer_draw).await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn send_chat_message() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/chat"))
+                .and(body_json_string("{\"room\":\"player\",\"text\":\"testText\"}"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client
+                .send_chat_message("testGameId".to_owned(), ChatRoom::Player, "testText").await;
 
             assert_that!(result).is_ok();
         });
