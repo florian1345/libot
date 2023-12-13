@@ -112,7 +112,7 @@ impl BotClient {
             text: text.into()
         };
 
-        self.send_request_with_body(Method::POST, &path, body).await?;
+        self.send_request_with_query(Method::POST, &path, body).await?;
 
         Ok(())
     }
@@ -356,7 +356,8 @@ mod tests {
 
             Mock::given(method("POST"))
                 .and(path("/bot/game/testGameId/chat"))
-                .and(body_json_string("{\"room\":\"player\",\"text\":\"testText\"}"))
+                .and(query_param("room", "player"))
+                .and(query_param("text", "testText"))
                 .respond_with(ResponseTemplate::new(200))
                 .expect(1)
                 .mount(&server)
