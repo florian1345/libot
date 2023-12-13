@@ -407,13 +407,6 @@ impl<'de> Deserialize<'de> for BotEvent {
     }
 }
 
-#[derive(Serialize)]
-pub(crate) struct DeclineRequest {
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) reason: Option<DeclineReason>
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 pub struct GamePerf {
 
@@ -503,7 +496,7 @@ pub struct GameFullEvent {
     pub state: GameStateEvent
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChatRoom {
     Player,
@@ -567,6 +560,19 @@ impl Deref for GameContext {
 pub struct UserProfile {
     pub id: UserId,
     pub username: String
+}
+
+#[derive(Serialize)]
+pub(crate) struct DeclineRequest {
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<DeclineReason>
+}
+
+#[derive(Serialize)]
+pub(crate) struct SendChatMessageRequest {
+    pub(crate) room: ChatRoom,
+    pub(crate) text: String
 }
 
 #[cfg(test)]
