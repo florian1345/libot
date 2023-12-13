@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
+use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
 use crate::model::{ChatRoom, DeclineReason, DeclineRequest, GameId, Move, Seconds, SendChatMessageRequest, UserProfile};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
+use reqwest::Result as ReqwestResult;
 use reqwest::header::{AUTHORIZATION, HeaderMap};
 
 use serde::Serialize;
@@ -29,12 +30,26 @@ pub fn join_url(base_url: &str, path: &str) -> String {
     url
 }
 
+async fn handle_error(response: ReqwestResult<Response>) -> LibotResult<Response> {
+    let response = response?;
+
+    if !response.status().is_success() {
+        return Err(LibotRequestError::ApiError {
+            status: response.status(),
+            body: response.text().await.ok()
+        });
+    }
+
+    Ok(response)
+}
+
 impl BotClient {
+
     pub(crate) async fn send_request(&self, method: Method, path: &str)
             -> LibotResult<Response> {
         let url = join_url(&self.base_url, path);
 
-        Ok(self.client.request(method, url).send().await?)
+        handle_error(self.client.request(method, url).send().await).await
     }
 
     pub(crate) async fn send_request_with_body(&self, method: Method, path: &str,
@@ -42,17 +57,15 @@ impl BotClient {
         let url = join_url(&self.base_url, path);
         let body = serde_json::to_string(&body)?;
 
-        Ok(self.client.request(method, url).body(body).send().await?)
+        handle_error(self.client.request(method, url).body(body).send().await).await
     }
 
     pub(crate) async fn send_request_with_query(&self, method: Method, path: &str,
             query: impl Serialize) -> LibotResult<Response> {
         let url = join_url(&self.base_url, path);
 
-        Ok(self.client.request(method, url).query(&query).send().await?)
+        handle_error(self.client.request(method, url).query(&query).send().await).await
     }
-
-    // TODO error handling for non-200 responses
 
     pub async fn accept_challenge(&self, challenge_id: GameId) -> LibotResult<()> {
         let path = format!("/challenge/{challenge_id}/accept");
