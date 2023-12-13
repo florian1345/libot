@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
-use crate::model::{ChatRoom, DeclineReason, DeclineRequest, GameId, Move, SendChatMessageRequest, UserProfile};
+use crate::model::{ChatRoom, DeclineReason, DeclineRequest, GameId, Move, Seconds, SendChatMessageRequest, UserProfile};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
 use reqwest::header::{AUTHORIZATION, HeaderMap};
@@ -52,8 +52,9 @@ impl BotClient {
         Ok(self.client.request(method, url).query(&query).send().await?)
     }
 
+    // TODO error handling for non-200 responses
+
     pub async fn accept_challenge(&self, challenge_id: GameId) -> LibotResult<()> {
-        // TODO error handling
         let path = format!("/challenge/{challenge_id}/accept");
         self.send_request(Method::POST, &path).await?;
 
@@ -62,7 +63,6 @@ impl BotClient {
 
     pub async fn decline_challenge(&self, challenge_id: GameId, reason: Option<DeclineReason>)
             -> LibotResult<()> {
-        // TODO error handling
         let path = format!("/challenge/{challenge_id}/decline");
         let body = DeclineRequest {
             reason
@@ -79,7 +79,6 @@ impl BotClient {
             offer_draw: bool
         }
 
-        // TODO error handling
         let path = format!("/bot/game/{game_id}/move/{mov}");
         let query = OfferDraw { offer_draw };
 
@@ -94,7 +93,6 @@ impl BotClient {
 
     pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
             -> LibotResult<()> {
-        // TODO error handling
         let path = format!("/bot/game/{game_id}/chat");
         let body = SendChatMessageRequest {
             room,
@@ -102,6 +100,19 @@ impl BotClient {
         };
 
         self.send_request_with_body(Method::POST, &path, body).await?;
+
+        Ok(())
+    }
+
+    /// Adds time to the opponent's clock.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: ID of the game in which to give time to the bot's opponent.
+    /// * `seconds`: The number of seconds to give the bot's opponent.
+    pub async fn add_time(&self, game_id: GameId, seconds: Seconds) -> LibotResult<()> {
+        let path = format!("/round/{game_id}/add-time/{seconds}");
+        self.send_request(Method::POST, &path).await?;
 
         Ok(())
     }
@@ -340,6 +351,24 @@ mod tests {
 
             let result = client
                 .send_chat_message("testGameId".to_owned(), ChatRoom::Player, "testText").await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn add_time() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/round/testGameId/add-time/240"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.add_time("testGameId".to_owned(), 240).await;
 
             assert_that!(result).is_ok();
         });
