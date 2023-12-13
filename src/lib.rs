@@ -96,7 +96,8 @@ async fn process_game_event(event: GameEvent, game_context: &GameContext, bot: &
 }
 
 async fn run_with_game_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
-    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: Arc<BotClient>, bot_id: UserId)
+    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: Arc<BotClient>,
+    bot_id: UserId)
 where
     E: Debug + Send + 'static
 {
@@ -201,6 +202,7 @@ fn ndjson_config() -> NdjsonConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
     use std::ops::Deref;
     use std::sync::{Arc, Mutex};
 
@@ -211,21 +213,13 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
 
     use crate::client::BotClientBuilder;
-    use crate::model::{
-        ChallengeColor,
-        ChallengePerf,
-        ChallengeStatus,
-        GameStatus,
-        Speed,
-        TimeControl,
-        User
-    };
+    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, GameEventPlayer, GameFullEvent, GamePerf, GameStatus, Speed, TimeControl, User, Variant};
 
     use super::*;
 
     struct MockBot {
         bot_events: Arc<Mutex<Vec<BotEvent>>>,
-        game_events: Arc<Mutex<Vec<GameEvent>>>
+        game_events: Arc<Mutex<Vec<(GameContext, GameEvent)>>>
     }
 
     #[async_trait::async_trait]
@@ -250,21 +244,24 @@ mod tests {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
         }
 
-        async fn on_game_state(&self, _: &GameContext, state: GameStateEvent, _: &BotClient) {
-            self.game_events.lock().unwrap().push(GameEvent::GameState(state))
+        async fn on_game_state(&self, context: &GameContext, state: GameStateEvent, _: &BotClient) {
+            self.game_events.lock().unwrap().push((context.clone(), GameEvent::GameState(state)))
         }
 
-        async fn on_chat_line(&self, _: &GameContext, chat_line: ChatLineEvent, _: &BotClient) {
-            self.game_events.lock().unwrap().push(GameEvent::ChatLine(chat_line))
-        }
-
-        async fn on_opponent_gone(&self, _: &GameContext, opponent_gone: OpponentGoneEvent,
+        async fn on_chat_line(&self, context: &GameContext, chat_line: ChatLineEvent,
                 _: &BotClient) {
-            self.game_events.lock().unwrap().push(GameEvent::OpponentGone(opponent_gone))
+            self.game_events.lock().unwrap().push((context.clone(), GameEvent::ChatLine(chat_line)))
+        }
+
+        async fn on_opponent_gone(&self, context: &GameContext, opponent_gone: OpponentGoneEvent,
+                _: &BotClient) {
+            self.game_events.lock().unwrap()
+                .push((context.clone(), GameEvent::OpponentGone(opponent_gone)))
         }
     }
 
-    fn create_mock_bot() -> (MockBot, Arc<Mutex<Vec<BotEvent>>>, Arc<Mutex<Vec<GameEvent>>>) {
+    fn create_mock_bot() -> (MockBot, Arc<Mutex<Vec<BotEvent>>>,
+            Arc<Mutex<Vec<(GameContext, GameEvent)>>>) {
         let bot_events = Arc::new(Mutex::new(Vec::new()));
         let game_events = Arc::new(Mutex::new(Vec::new()));
         let mock_bot = MockBot {
@@ -419,8 +416,148 @@ mod tests {
                 black_take_back_proposal: false,
             };
 
-            assert_that!(tracked_events.deref())
-                .contains_exactly_in_given_order([GameEvent::GameState(expected_event)]);
+            assert_that!(tracked_events.deref()).has_length(1);
+            assert_that!(&tracked_events.deref()[0].1)
+                .is_equal_to(&GameEvent::GameState(expected_event.clone()));
         });
+    }
+
+    fn player_with_id(id: &str) -> GameEventPlayer {
+        GameEventPlayer {
+            ai_level: None,
+            id: Some(id.to_owned()),
+            name: None,
+            title: None,
+            rating: None,
+            provisional: None
+        }
+    }
+
+    fn game_state_event(moves: &str) -> GameStateEvent {
+        GameStateEvent {
+            moves: moves.to_string(),
+            white_time: 1,
+            black_time: 2,
+            white_increment: 3,
+            black_increment: 4,
+            status: GameStatus::Created,
+            winner: None,
+            white_draw_offer: false,
+            black_draw_offer: false,
+            white_take_back_proposal: false,
+            black_take_back_proposal: false,
+        }
+    }
+
+    #[rstest]
+    #[case::no_further_events(vec![])]
+    #[case::game_state_event(vec![
+        GameEvent::GameState(game_state_event("testMoves2"))
+    ])]
+    #[case::chat_line(vec![
+        GameEvent::ChatLine(ChatLineEvent {
+            room: ChatRoom::Player,
+            username: "testUsername".to_owned(),
+            text: "testText".to_owned()
+        })
+    ])]
+    #[case::opponent_gone(vec![
+        GameEvent::OpponentGone(OpponentGoneEvent {
+            gone: true,
+            claim_win_in_seconds: Some(30)
+        })
+    ])]
+    fn correct_game_events_are_called_on_bot(#[case] events: Vec<GameEvent>) {
+        let game_info = GameInfo {
+            id: "testGameId".to_string(),
+            variant: Some(Variant::Standard),
+            clock: None,
+            speed: Speed::Bullet,
+            perf: GamePerf {
+                name: None,
+            },
+            rated: false,
+            created_at: 0,
+            white: player_with_id("testWhiteId"),
+            black: player_with_id("testBlackId"),
+            initial_fen: "testInitialFen".to_string(),
+            tournament_id: None,
+        };
+        let first_state_event = game_state_event("testMoves1");
+
+        let (bot, _, tracked_events) = create_mock_bot();
+        let event_results = iter::once(
+                GameEvent::GameFull(GameFullEvent {
+                    info: game_info.clone(),
+                    state: first_state_event.clone(),
+                }))
+            .chain(events.iter().cloned())
+            .map(Ok)
+            .collect::<Vec<Result<_, &str>>>();
+        let stream = stream::iter(event_results);
+        let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
+        let bot_id = "testId".to_owned();
+
+        tokio_test::block_on(run_with_game_event_stream(
+            Arc::new(bot), stream, Arc::new(mock_client), bot_id.clone()));
+
+        let tracked_events = tracked_events.lock().unwrap();
+        let expected_context = GameContext {
+            bot_color: None,
+            bot_id,
+            info: game_info
+        };
+        let expected_events = events.into_iter()
+            .map(|event| (expected_context.clone(), event))
+            .collect::<Vec<_>>();
+
+        assert_that!(tracked_events.deref())
+            .has_length(expected_events.len() + 1)
+            .starts_with([(expected_context, GameEvent::GameState(first_state_event))])
+            .ends_with(expected_events);
+    }
+
+    #[rstest]
+    #[case::neither("testWhiteId", "testBlackId", "testBotId", None)]
+    #[case::white("testBotId", "testBlackId", "testBotId", Some(Color::White))]
+    #[case::black("testWhiteId", "testBotId", "testBotId", Some(Color::Black))]
+    fn game_context_has_correct_bot_color(
+            #[case] white_id: &str,
+            #[case] black_id: &str,
+            #[case] bot_id: &str,
+            #[case] expected_bot_color: Option<Color>) {
+        let game_info = GameInfo {
+            id: "testGameId".to_string(),
+            variant: Some(Variant::Standard),
+            clock: None,
+            speed: Speed::Classical,
+            perf: GamePerf {
+                name: None,
+            },
+            rated: false,
+            created_at: 0,
+            white: player_with_id(white_id),
+            black: player_with_id(black_id),
+            initial_fen: "testInitialFen".to_string(),
+            tournament_id: None,
+        };
+        let state_event = game_state_event("testMoves");
+
+        let (bot, _, tracked_events) = create_mock_bot();
+        let stream = stream::once(async {
+            Ok::<_, &str>(GameEvent::GameFull(
+                GameFullEvent {
+                    info: game_info.clone(),
+                    state: state_event
+                }))
+        });
+        let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
+
+        tokio_test::block_on(run_with_game_event_stream(
+            Arc::new(bot), stream, Arc::new(mock_client), bot_id.to_owned()));
+
+        let tracked_events = tracked_events.lock().unwrap();
+
+        assert_that!(tracked_events.deref()[0].0.bot_color).is_equal_to(expected_bot_color);
     }
 }
