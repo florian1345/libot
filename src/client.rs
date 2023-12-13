@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotResult};
 use crate::model::{DeclineReason, DeclineRequest, GameId, Move, UserProfile};
 
@@ -6,10 +8,10 @@ use reqwest::header::{AUTHORIZATION, HeaderMap};
 
 use serde::Serialize;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BotClient {
     client: Client,
-    base_url: String
+    base_url: Arc<str>
 }
 
 pub fn join_url(base_url: &str, path: &str) -> String {
@@ -126,7 +128,7 @@ impl BotClientBuilder {
 
             Ok(BotClient {
                 client,
-                base_url: self.base_url
+                base_url: Arc::from(self.base_url)
             })
         }
         else {
@@ -175,7 +177,7 @@ mod tests {
             .build();
 
         assert_that!(&result).is_ok();
-        assert_that!(result.unwrap().base_url.as_str()).is_equal_to(DEFAULT_BASE_URL);
+        assert_that!(result.unwrap().base_url.as_ref()).is_equal_to(DEFAULT_BASE_URL);
     }
 
     #[test]
@@ -187,7 +189,7 @@ mod tests {
             .build();
 
         assert_that!(&result).is_ok();
-        assert_that!(result.unwrap().base_url.as_str()).is_equal_to(base_url);
+        assert_that!(result.unwrap().base_url.as_ref()).is_equal_to(base_url);
     }
 
     #[test]

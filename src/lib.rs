@@ -96,8 +96,7 @@ async fn process_game_event(event: GameEvent, game_context: &GameContext, bot: &
 }
 
 async fn run_with_game_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
-    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: Arc<BotClient>,
-    bot_id: UserId)
+    mut event_stream: impl Stream<Item = Result<GameEvent, E>>, client: BotClient, bot_id: UserId)
 where
     E: Debug + Send + 'static
 {
@@ -114,7 +113,7 @@ where
                 info: game_full.info
             };
 
-            bot.on_game_state(&game_context, game_full.state, client.as_ref()).await
+            bot.on_game_state(&game_context, game_full.state, &client).await
         },
         Some(_) => panic!(), // TODO proper error handling
         None => return
@@ -124,23 +123,23 @@ where
 
     event_stream.map(|record| {
         let bot = Arc::clone(&bot);
-        let client = Arc::clone(&client);
+        let client = client.clone();
         let game_context = Arc::clone(&game_context);
 
         task::spawn(async move {
             process_game_event(
-                record.unwrap(), game_context.as_ref(), bot.as_ref(), client.as_ref()).await;
+                record.unwrap(), game_context.as_ref(), bot.as_ref(), &client).await;
         })
     }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
 }
 
 async fn process_bot_event(event: BotEvent, bot: Arc<impl Bot + Send + 'static>,
-        client: Arc<BotClient>, bot_id: UserId) {
+        client: BotClient, bot_id: UserId) {
     // TODO enable error handling
     match event {
         BotEvent::GameStart(game) => {
             let game_id = game.id.clone();
-            bot.as_ref().on_game_start(game, client.as_ref()).await;
+            bot.as_ref().on_game_start(game, &client).await;
 
             if let Some(game_id) = game_id {
                 let event_path = game_event_path(&game_id);
@@ -156,24 +155,24 @@ async fn process_bot_event(event: BotEvent, bot: Arc<impl Bot + Send + 'static>,
             }
         },
         BotEvent::GameFinish(game) =>
-            bot.as_ref().on_game_finish(game, client.as_ref()).await,
+            bot.as_ref().on_game_finish(game, &client).await,
         BotEvent::Challenge(challenge) =>
-            bot.as_ref().on_challenge(challenge, client.as_ref()).await,
+            bot.as_ref().on_challenge(challenge, &client).await,
         BotEvent::ChallengeCanceled(challenge) =>
-            bot.as_ref().on_challenge_cancelled(challenge, client.as_ref()).await,
+            bot.as_ref().on_challenge_cancelled(challenge, &client).await,
         BotEvent::ChallengeDeclined(challenge) =>
-            bot.as_ref().on_challenge_declined(challenge, client.as_ref()).await
+            bot.as_ref().on_challenge_declined(challenge, &client).await
     }
 }
 
 async fn run_with_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
-    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: Arc<BotClient>, bot_id: UserId)
+    event_stream: impl Stream<Item = Result<BotEvent, E>>, client: BotClient, bot_id: UserId)
 where
     E: Debug + Send + 'static
 {
     event_stream.map(|record| {
         let bot = Arc::clone(&bot);
-        let client = Arc::clone(&client);
+        let client = client.clone();
         let bot_id = bot_id.clone();
 
         task::spawn(async move {
@@ -189,7 +188,6 @@ pub async fn run(bot: impl Bot + Send + 'static, client: BotClient) -> LibotResu
         ndjson_stream::from_fallible_stream_with_config::<BotEvent, _>(
             response.bytes_stream(), ndjson_config());
     let bot = Arc::new(bot);
-    let client = Arc::new(client);
 
     #[allow(clippy::unit_arg)]
     Ok(run_with_event_stream(bot, stream, client, bot_id).await)
@@ -347,7 +345,7 @@ mod tests {
         let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
 
         tokio_test::block_on(run_with_event_stream(
-            Arc::new(bot), stream, Arc::new(mock_client), "testId".to_owned()));
+            Arc::new(bot), stream, mock_client, "testId".to_owned()));
 
         let tracked_events = tracked_events.lock().unwrap();
 
@@ -398,8 +396,7 @@ mod tests {
                 }))
             });
 
-            run_with_event_stream(Arc::new(bot), stream, Arc::new(client), "testId".to_owned())
-                .await;
+            run_with_event_stream(Arc::new(bot), stream, client, "testId".to_owned()).await;
 
             let tracked_events = tracked_events.lock().unwrap();
             let expected_event = GameStateEvent {
@@ -499,7 +496,7 @@ mod tests {
         let bot_id = "testId".to_owned();
 
         tokio_test::block_on(run_with_game_event_stream(
-            Arc::new(bot), stream, Arc::new(mock_client), bot_id.clone()));
+            Arc::new(bot), stream, mock_client, bot_id.clone()));
 
         let tracked_events = tracked_events.lock().unwrap();
         let expected_context = GameContext {
@@ -554,7 +551,7 @@ mod tests {
         let mock_client = BotClientBuilder::new().with_token("").build().unwrap();
 
         tokio_test::block_on(run_with_game_event_stream(
-            Arc::new(bot), stream, Arc::new(mock_client), bot_id.to_owned()));
+            Arc::new(bot), stream, mock_client, bot_id.to_owned()));
 
         let tracked_events = tracked_events.lock().unwrap();
 
