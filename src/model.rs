@@ -58,6 +58,22 @@ pub enum GameStatus {
     VariantEnd
 }
 
+impl GameStatus {
+
+    /// Indicates whether a game with this status is running, i.e. no decision has been reached and
+    /// moves can still be played.
+    ///
+    /// # Returns
+    ///
+    /// `true` if and only if a game with this status is running.
+    pub fn is_running(self) -> bool {
+        match self {
+            GameStatus::Created | GameStatus::Started => true,
+            _ => false
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum GameStatusError {
 
@@ -1764,5 +1780,23 @@ mod tests {
         let event = serde_json::from_str(json).unwrap();
 
         assert_that!(event).is_equal_to(expected_event);
+    }
+
+    #[rstest]
+    #[case::created(GameStatus::Created, true)]
+    #[case::created(GameStatus::Started, true)]
+    #[case::created(GameStatus::Aborted, false)]
+    #[case::created(GameStatus::Mate, false)]
+    #[case::created(GameStatus::Resign, false)]
+    #[case::created(GameStatus::Stalemate, false)]
+    #[case::created(GameStatus::Timeout, false)]
+    #[case::created(GameStatus::Draw, false)]
+    #[case::created(GameStatus::OutOfTime, false)]
+    #[case::created(GameStatus::Cheat, false)]
+    #[case::created(GameStatus::NoStart, false)]
+    #[case::created(GameStatus::UnknownFinish, false)]
+    #[case::created(GameStatus::VariantEnd, false)]
+    fn game_status_is_running(#[case] game_status: GameStatus, #[case] expected_is_running: bool) {
+        assert_that!(game_status.is_running()).is_equal_to(expected_is_running);
     }
 }
