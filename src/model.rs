@@ -67,10 +67,7 @@ impl GameStatus {
     ///
     /// `true` if and only if a game with this status is running.
     pub fn is_running(self) -> bool {
-        match self {
-            GameStatus::Created | GameStatus::Started => true,
-            _ => false
-        }
+        matches!(self, GameStatus::Created | GameStatus::Started)
     }
 }
 
