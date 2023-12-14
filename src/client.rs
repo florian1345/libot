@@ -52,21 +52,18 @@ impl BotClient {
         handle_error(self.client.request(method, url).send().await).await
     }
 
-    async fn send_request_with_body(&self, method: Method, path: &str, body: String)
-            -> LibotResult<Response> {
+    pub(crate) async fn send_request_with_body(&self, method: Method, path: &str,
+            body: impl Serialize) -> LibotResult<Response> {
         let url = join_url(&self.base_url, path);
 
-        handle_error(self.client.request(method, url).body(body).send().await).await
+        handle_error(self.client.request(method, url).json(&body).send().await).await
     }
 
-    pub(crate) async fn send_request_with_json_body(&self, method: Method, path: &str,
-            body: impl Serialize) -> LibotResult<Response> {
-        self.send_request_with_body(method, path, serde_json::to_string(&body)?).await
-    }
+    pub(crate) async fn send_request_with_form(&self, method: Method, path: &str,
+            form: impl Serialize) -> LibotResult<Response> {
+        let url = join_url(&self.base_url, path);
 
-    pub(crate) async fn send_request_with_urlencoded_body(&self, method: Method, path: &str,
-            body: impl Serialize) -> LibotResult<Response> {
-        self.send_request_with_body(method, path, serde_urlencoded::to_string(&body)?).await
+        handle_error(self.client.request(method, url).form(&form).send().await).await
     }
 
     pub(crate) async fn send_request_with_query(&self, method: Method, path: &str,
@@ -89,7 +86,7 @@ impl BotClient {
         let body = DeclineRequest {
             reason
         };
-        self.send_request_with_json_body(Method::POST, &path, body).await?;
+        self.send_request_with_body(Method::POST, &path, body).await?;
 
         Ok(())
     }
@@ -121,7 +118,7 @@ impl BotClient {
             text: text.into()
         };
 
-        self.send_request_with_urlencoded_body(Method::POST, &path, body).await?;
+        self.send_request_with_form(Method::POST, &path, body).await?;
 
         Ok(())
     }
