@@ -52,12 +52,21 @@ impl BotClient {
         handle_error(self.client.request(method, url).send().await).await
     }
 
-    pub(crate) async fn send_request_with_body(&self, method: Method, path: &str,
-            body: impl Serialize) -> LibotResult<Response> {
+    async fn send_request_with_body(&self, method: Method, path: &str, body: String)
+            -> LibotResult<Response> {
         let url = join_url(&self.base_url, path);
-        let body = serde_json::to_string(&body)?;
 
         handle_error(self.client.request(method, url).body(body).send().await).await
+    }
+
+    pub(crate) async fn send_request_with_json_body(&self, method: Method, path: &str,
+            body: impl Serialize) -> LibotResult<Response> {
+        self.send_request_with_body(method, path, serde_json::to_string(&body)?).await
+    }
+
+    pub(crate) async fn send_request_with_urlencoded_body(&self, method: Method, path: &str,
+            body: impl Serialize) -> LibotResult<Response> {
+        self.send_request_with_body(method, path, serde_urlencoded::to_string(&body)?).await
     }
 
     pub(crate) async fn send_request_with_query(&self, method: Method, path: &str,
@@ -80,7 +89,7 @@ impl BotClient {
         let body = DeclineRequest {
             reason
         };
-        self.send_request_with_body(Method::POST, &path, body).await?;
+        self.send_request_with_json_body(Method::POST, &path, body).await?;
 
         Ok(())
     }
@@ -112,7 +121,7 @@ impl BotClient {
             text: text.into()
         };
 
-        self.send_request_with_query(Method::POST, &path, body).await?;
+        self.send_request_with_urlencoded_body(Method::POST, &path, body).await?;
 
         Ok(())
     }
@@ -189,7 +198,7 @@ mod tests {
     use kernal::prelude::*;
     use rstest::rstest;
     use wiremock::{Mock, ResponseTemplate};
-    use wiremock::matchers::{body_json_string, method, path, query_param};
+    use wiremock::matchers::{body_json_string, body_string, method, path, query_param};
     use crate::test_util;
 
     #[test]
@@ -356,8 +365,7 @@ mod tests {
 
             Mock::given(method("POST"))
                 .and(path("/bot/game/testGameId/chat"))
-                .and(query_param("room", "player"))
-                .and(query_param("text", "testText"))
+                .and(body_string("room=player&text=testText"))
                 .respond_with(ResponseTemplate::new(200))
                 .expect(1)
                 .mount(&server)
