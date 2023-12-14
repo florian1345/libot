@@ -1,4 +1,4 @@
-use reqwest::{Error as ReqwestError, StatusCode};
+use reqwest::{Error as ReqwestError, StatusCode, Url};
 use reqwest::header::InvalidHeaderValue;
 
 use serde_json::Error as JsonError;
@@ -16,10 +16,11 @@ pub enum LibotRequestError {
     #[error("error serializing JSON body or deserializing JSON response: {0}")]
     JsonError(#[from] JsonError),
 
-    #[error("status {status} from API with body: {body:?}")]
+    #[error("status {status} from API request {url} with response body: {body:?}")]
     ApiError {
         status: StatusCode,
-        body: Option<String>
+        body: Option<String>,
+        url: Url
     }
 }
 
