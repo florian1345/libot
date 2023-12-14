@@ -3,8 +3,6 @@ use reqwest::header::InvalidHeaderValue;
 
 use serde_json::Error as JsonError;
 
-use serde_urlencoded::ser::Error as UrlencodedError;
-
 use thiserror::Error;
 
 use crate::client::BotClient;
@@ -17,9 +15,6 @@ pub enum LibotRequestError {
 
     #[error("error serializing JSON body or deserializing JSON response: {0}")]
     JsonError(#[from] JsonError),
-
-    #[error("error serializing URL-encoded body: {0}")]
-    UrlencodedError(#[from] UrlencodedError),
 
     #[error("status {status} from API with body: {body:?}")]
     ApiError {
