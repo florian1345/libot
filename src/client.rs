@@ -34,9 +34,13 @@ async fn handle_error(response: ReqwestResult<Response>) -> LibotResult<Response
     let response = response?;
 
     if !response.status().is_success() {
+        let status = response.status();
+        let url = response.url().clone();
+
         return Err(LibotRequestError::ApiError {
-            status: response.status(),
-            body: response.text().await.ok()
+            status,
+            body: response.text().await.ok(),
+            url
         });
     }
 
