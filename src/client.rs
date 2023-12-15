@@ -1,13 +1,17 @@
 use std::sync::Arc;
 
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
-use crate::model::{ChatRoom, DeclineReason, DeclineRequest, GameId, Move, Seconds, SendChatMessageRequest, UserProfile};
+use crate::model::{Move, Seconds, UserProfile};
 
 use reqwest::{Client, ClientBuilder, Method, Response};
 use reqwest::Result as ReqwestResult;
 use reqwest::header::{AUTHORIZATION, HeaderMap};
 
 use serde::Serialize;
+use crate::model::challenge::DeclineReason;
+use crate::model::game::event::ChatRoom;
+use crate::model::game::GameId;
+use crate::model::request::{DeclineRequest, SendChatMessageRequest};
 
 #[derive(Clone, Debug)]
 pub struct BotClient {
