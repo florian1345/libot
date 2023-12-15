@@ -10,24 +10,13 @@ use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
 use reqwest::Method;
 
 use tokio::task;
+use model::bot_event::{BotEvent, ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
+use model::game::{Color, GameContext, GameId, GameInfo};
+use model::game::event::{ChatLineEvent, GameEvent, GameStateEvent, OpponentGoneEvent};
+use model::user::UserId;
 
 use crate::client::BotClient;
 use crate::error::LibotResult;
-use crate::model::{
-    ChallengeEvent,
-    ChallengeDeclinedEvent,
-    BotEvent,
-    GameStartFinishEvent,
-    GameId,
-    GameStateEvent,
-    ChatLineEvent,
-    OpponentGoneEvent,
-    GameEvent,
-    GameContext,
-    UserId,
-    Color,
-    GameInfo
-};
 
 pub mod model;
 pub mod error;
@@ -211,7 +200,11 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
 
     use crate::client::BotClientBuilder;
-    use crate::model::{ChallengeColor, ChallengePerf, ChallengeStatus, ChatRoom, GameEventPlayer, GameFullEvent, GamePerf, GameStatus, Speed, TimeControl, User, Variant};
+    use crate::model::TimeControl;
+    use crate::model::challenge::{ChallengeColor, ChallengePerf, ChallengeStatus};
+    use crate::model::game::{GamePerf, GameStatus, Speed, Variant};
+    use crate::model::game::event::{ChatRoom, GameEventPlayer, GameFullEvent};
+    use crate::model::user::User;
 
     use super::*;
 
