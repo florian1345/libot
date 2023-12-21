@@ -7,7 +7,7 @@ use crate::model::challenge::{
     ChallengeStatus,
     DeclineReason
 };
-use crate::model::{Compat, TimeControl};
+use crate::model::{Compat, TimeControl, Url};
 use crate::model::game::event::GameEventSource;
 use crate::model::game::{
     deserialize_game_status_from_object,
@@ -37,7 +37,7 @@ pub struct GameStartFinishEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ChallengeEvent {
     pub id: GameId,
-    pub url: String,
+    pub url: Url,
     pub status: ChallengeStatus,
     pub challenger: User,
     pub dest_user: Option<User>,
@@ -117,12 +117,12 @@ mod tests {
     fn minimal_user(id: &str, name: &str) -> User {
         User {
             rating: None,
-            provisional: None,
-            online: None,
+            provisional: false,
+            online: false,
             id: id.to_owned(),
             name: name.to_owned(),
             title: None,
-            patron: None,
+            patron: false
         }
     }
 
@@ -270,12 +270,12 @@ mod tests {
             status: ChallengeStatus::Created,
             challenger: User {
                 rating: None,
-                provisional: None,
-                online: None,
+                provisional: false,
+                online: false,
                 id: "testChallengerId".to_owned(),
                 name: "testChallengerName".to_owned(),
                 title: None,
-                patron: None
+                patron: false
             },
             dest_user: None,
             variant: None,
@@ -326,12 +326,12 @@ mod tests {
             status: ChallengeStatus::Created,
             challenger: User {
                 rating: Some(2345),
-                provisional: Some(false),
-                online: Some(true),
+                provisional: false,
+                online: true,
                 id: "testChallengerId".to_owned(),
                 name: "testChallengerName".to_owned(),
                 title: Some(Title::Wgm),
-                patron: Some(true)
+                patron: true
             },
             dest_user: None,
             variant: None,
@@ -380,21 +380,21 @@ mod tests {
             status: ChallengeStatus::Created,
             challenger: User {
                 rating: None,
-                provisional: None,
-                online: None,
+                provisional: false,
+                online: false,
                 id: "testChallengerId".to_owned(),
                 name: "testChallengerName".to_owned(),
                 title: None,
-                patron: None
+                patron: false
             },
             dest_user: Some(User {
                 rating: None,
-                provisional: None,
-                online: None,
+                provisional: false,
+                online: false,
                 id: "testDestUserId".to_owned(),
                 name: "testDestUserName".to_owned(),
                 title: None,
-                patron: None
+                patron: false
             }),
             variant: None,
             rated: false,

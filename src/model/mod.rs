@@ -1,7 +1,8 @@
 use serde::Deserialize;
+use serde_json::Value;
+use std::hash::{Hash, Hasher};
 
 use crate::model::game::Clock;
-use crate::model::user::UserId;
 
 pub mod user;
 pub mod game;
@@ -11,6 +12,7 @@ pub(crate) mod request;
 
 pub type Move = String;
 pub type Moves = String;
+pub type Url = String;
 pub type Milliseconds = i64;
 pub type Seconds = i32;
 pub type Days = i32;
@@ -35,8 +37,31 @@ pub enum TimeControl {
     Unlimited
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-pub struct UserProfile {
-    pub id: UserId,
-    pub username: String
+struct AnyRef<'reference>(&'reference Value);
+
+impl<'reference> Hash for AnyRef<'reference> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match &self.0 {
+            Value::Null => 0u8.hash(state),
+            Value::Bool(value) => value.hash(state),
+            Value::Number(value) => value.hash(state),
+            Value::String(value) => value.hash(state),
+            Value::Array(value) => value.iter()
+                .map(AnyRef)
+                .for_each(|item| item.hash(state)),
+            Value::Object(value) => value.iter()
+                .map(|(key, value)| (key, AnyRef(value)))
+                .for_each(|item| item.hash(state))
+        }
+    }
+}
+
+/// Represents any JSON-[Value]. The wrapper allows for a [Hash] implementation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct Any(pub Value);
+
+impl Hash for Any {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        AnyRef(&self.0).hash(state)
+    }
 }
