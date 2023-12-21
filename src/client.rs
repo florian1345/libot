@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
-use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
-use crate::model::{Move, Seconds, UserProfile};
-
 use reqwest::{Client, ClientBuilder, Method, Response};
-use reqwest::Result as ReqwestResult;
 use reqwest::header::{AUTHORIZATION, HeaderMap};
+use reqwest::Result as ReqwestResult;
 
 use serde::Serialize;
+
+use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
+use crate::model::{Move, Seconds};
 use crate::model::challenge::DeclineReason;
 use crate::model::game::event::ChatRoom;
 use crate::model::game::GameId;
 use crate::model::request::{DeclineRequest, SendChatMessageRequest};
+use crate::model::user::UserProfile;
 
 #[derive(Clone, Debug)]
 pub struct BotClient {
@@ -198,13 +199,16 @@ impl Default for BotClientBuilder {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-
     use kernal::prelude::*;
+
     use rstest::rstest;
+
     use wiremock::{Mock, ResponseTemplate};
     use wiremock::matchers::{body_json_string, body_string, method, path, query_param};
+
     use crate::test_util;
+
+    use super::*;
 
     #[test]
     fn building_bot_client_fails_without_token() {
