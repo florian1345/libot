@@ -119,6 +119,17 @@ impl BotClient {
         Ok(self.send_request(Method::GET, "/account").await?.json().await?)
     }
 
+    /// Queries the [UserProfile] of the user with the given name.
+    ///
+    /// # Arguments
+    ///
+    /// * `username`: The username of the user whose profile to query.
+    pub async fn get_profile(&self, username: String) -> LibotResult<UserProfile> {
+        let path = format!("/user/{username}");
+
+        Ok(self.send_request(Method::GET, &path).await?.json().await?)
+    }
+
     pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
             -> LibotResult<()> {
         let path = format!("/bot/game/{game_id}/chat");
@@ -198,7 +209,6 @@ impl Default for BotClientBuilder {
 
 #[cfg(test)]
 mod tests {
-
     use kernal::prelude::*;
 
     use rstest::rstest;
@@ -206,6 +216,7 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
     use wiremock::matchers::{body_json_string, body_string, method, path, query_param};
 
+    use crate::model::user::{PlayTime, UserProfileStats};
     use crate::test_util;
 
     use super::*;
@@ -403,5 +414,115 @@ mod tests {
 
             assert_that!(result).is_ok();
         });
+    }
+
+    fn get_test_user_json() -> &'static str {
+        r#"{
+            "id": "testId",
+            "username": "testName",
+            "createdAt": 12345,
+            "seenAt": 23456,
+            "playTime": {
+                "total": 34567,
+                "tv": 4567
+            },
+            "url": "testUrl",
+            "count": {
+                "all": 123,
+                "rated": 234,
+                "ai": 345,
+                "draw": 456,
+                "drawH": 567,
+                "loss": 678,
+                "lossH": 789,
+                "win": 890,
+                "winH": 123,
+                "bookmark": 234,
+                "playing": 345,
+                "import": 456,
+                "me": 567
+            }
+        }"#
+    }
+
+    fn get_test_user() -> UserProfile {
+        UserProfile {
+            id: "testId".to_string(),
+            username: "testName".to_string(),
+            perfs: Default::default(),
+            created_at: 12345,
+            disabled: false,
+            tos_violation: false,
+            profile: Default::default(),
+            seen_at: 23456,
+            patron: false,
+            verified: false,
+            play_time: PlayTime {
+                total: 34567,
+                tv: 4567
+            },
+            title: None,
+            url: "testUrl".to_string(),
+            playing: None,
+            count: UserProfileStats {
+                all: 123,
+                rated: 234,
+                ai: 345,
+                draw: 456,
+                draw_h: 567,
+                loss: 678,
+                loss_h: 789,
+                win: 890,
+                win_h: 123,
+                bookmark: 234,
+                playing: 345,
+                import: 456,
+                me: 567
+            },
+            streaming: false,
+            streamer: None,
+            followable: false,
+            following: false,
+            blocking: false,
+            follows_you: false,
+        }
+    }
+
+    #[test]
+    fn get_my_profile() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("GET"))
+                .and(path("/account"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string(get_test_user_json()))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.get_my_profile().await;
+
+            assert_that!(result).contains_value(get_test_user());
+        })
+    }
+
+    #[test]
+    fn get_profile() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("GET"))
+                .and(path("/user/testId"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string(get_test_user_json()))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.get_profile("testId".to_owned()).await;
+
+            assert_that!(result).contains_value(get_test_user());
+        })
     }
 }
