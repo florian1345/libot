@@ -189,13 +189,17 @@ fn ndjson_config() -> NdjsonConfig {
 
 #[cfg(test)]
 mod tests {
+
     use std::iter;
     use std::ops::Deref;
     use std::sync::{Arc, Mutex};
 
     use futures::stream;
+
     use kernal::prelude::*;
+
     use rstest::rstest;
+
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, ResponseTemplate};
 
@@ -203,7 +207,8 @@ mod tests {
     use crate::model::TimeControl;
     use crate::model::challenge::{ChallengeColor, ChallengePerf, ChallengeStatus};
     use crate::model::game::{GamePerf, GameStatus, Speed, Variant};
-    use crate::model::game::event::{ChatRoom, GameEventPlayer, GameFullEvent};
+    use crate::model::game::chat::{ChatLine, ChatRoom};
+    use crate::model::game::event::{GameEventPlayer, GameFullEvent};
     use crate::model::user::User;
 
     use super::*;
@@ -447,8 +452,10 @@ mod tests {
     #[case::chat_line(vec![
         GameEvent::ChatLine(ChatLineEvent {
             room: ChatRoom::Player,
-            username: "testUsername".to_owned(),
-            text: "testText".to_owned()
+            chat_line: ChatLine {
+                username: "testUsername".to_owned(),
+                text: "testText".to_owned()
+            }
         })
     ])]
     #[case::opponent_gone(vec![

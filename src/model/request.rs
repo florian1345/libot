@@ -1,5 +1,5 @@
 use crate::model::challenge::DeclineReason;
-use crate::model::game::event::ChatRoom;
+use crate::model::game::chat::ChatRoom;
 
 use serde::Serialize;
 

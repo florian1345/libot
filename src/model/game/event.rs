@@ -1,7 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
 use crate::model::{Milliseconds, Seconds};
+use crate::model::game::{Color, GameInfo, GameStatus};
+use crate::model::game::chat::{ChatLine, ChatRoom};
 use crate::model::user::{AiLevel, Rating, Title, UserId};
-use super::{Color, GameInfo, GameStatus};
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -66,18 +68,12 @@ pub struct GameFullEvent {
     pub state: GameStateEvent
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChatRoom {
-    Player,
-    Spectator
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 pub struct ChatLineEvent {
     pub room: ChatRoom,
-    pub username: String,
-    pub text: String
+
+    #[serde(flatten)]
+    pub chat_line: ChatLine
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -610,8 +606,10 @@ mod tests {
         }"#,
         GameEvent::ChatLine(ChatLineEvent {
             room: ChatRoom::Spectator,
-            username: "testUsername".to_owned(),
-            text: "testText".to_owned()
+            chat_line: ChatLine {
+                username: "testUsername".to_owned(),
+                text: "testText".to_owned()
+            }
         })
     )]
     #[case::minimal_opponent_gone(
