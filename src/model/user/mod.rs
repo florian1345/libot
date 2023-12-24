@@ -4,6 +4,8 @@ use serde::Deserialize;
 
 use crate::model::{Any, Seconds, Timestamp, Url};
 
+pub mod preferences;
+
 pub type UserId = String;
 pub type Rating = i32;
 pub type AiLevel = i32;

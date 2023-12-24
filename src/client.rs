@@ -12,6 +12,7 @@ use crate::model::challenge::DeclineReason;
 use crate::model::game::event::ChatRoom;
 use crate::model::game::GameId;
 use crate::model::request::{DeclineRequest, SendChatMessageRequest};
+use crate::model::user::preferences::UserPreferences;
 use crate::model::user::UserProfile;
 
 #[derive(Clone, Debug)]
@@ -115,10 +116,6 @@ impl BotClient {
         Ok(())
     }
 
-    pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
-        Ok(self.send_request(Method::GET, "/account").await?.json().await?)
-    }
-
     /// Queries the [UserProfile] of the user with the given name.
     ///
     /// # Arguments
@@ -128,6 +125,14 @@ impl BotClient {
         let path = format!("/user/{username}");
 
         Ok(self.send_request(Method::GET, &path).await?.json().await?)
+    }
+
+    pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
+        Ok(self.send_request(Method::GET, "/account").await?.json().await?)
+    }
+
+    pub async fn get_my_preferences(&self) -> LibotResult<UserPreferences> {
+        Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
     }
 
     pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
@@ -489,6 +494,25 @@ mod tests {
     }
 
     #[test]
+    fn get_profile() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("GET"))
+                .and(path("/user/testId"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string(get_test_user_json()))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.get_profile("testId".to_owned()).await;
+
+            assert_that!(result).contains_value(get_test_user());
+        })
+    }
+
+    #[test]
     fn get_my_profile() {
         tokio_test::block_on(async {
             let (client, server) = test_util::setup_wiremock_test().await;
@@ -508,21 +532,90 @@ mod tests {
     }
 
     #[test]
-    fn get_profile() {
+    fn get_my_preferences() {
         tokio_test::block_on(async {
+            let preferences = UserPreferences {
+                dark: false,
+                transparent: false,
+                background_image: "testBackgroundImage".to_owned(),
+                is_3d: false,
+                theme: "testTheme".to_owned(),
+                piece_set: "testPieceSet".to_owned(),
+                theme_3d: "testTheme3d".to_owned(),
+                piece_set_3d: "testPieceSet3d".to_owned(),
+                sound_set: "testSoundSet".to_owned(),
+                blindfold: 0,
+                auto_queen: 1,
+                auto_threefold: 2,
+                take_back: 0,
+                more_time: 1,
+                clock_tenths: 2,
+                clock_bar: false,
+                clock_sound: false,
+                premove: false,
+                animation: 0,
+                captured: false,
+                follow: false,
+                highlight: false,
+                destination: false,
+                coords: 1,
+                replay: 2,
+                challenge: 0,
+                message: 1,
+                coord_color: 2,
+                submit_move: 0,
+                confirm_resign: 1,
+                insight_share: 2,
+                keyboard_move: 0,
+                zen: 1,
+                move_event: 2,
+                rook_castle: 0,
+                language: "testLanguage".to_owned()
+            };
+            let preferences_json = r#"{
+                "prefs": {
+                    "bgImg": "testBackgroundImage",
+                    "theme": "testTheme",
+                    "pieceSet": "testPieceSet",
+                    "theme3d": "testTheme3d",
+                    "pieceSet3d": "testPieceSet3d",
+                    "soundSet": "testSoundSet",
+                    "blindfold": 0,
+                    "autoQueen": 1,
+                    "autoThreefold": 2,
+                    "takeback": 0,
+                    "moretime": 1,
+                    "clockTenths": 2,
+                    "animation": 0,
+                    "coords": 1,
+                    "replay": 2,
+                    "challenge": 0,
+                    "message": 1,
+                    "coordColor": 2,
+                    "submitMove": 0,
+                    "confirmResign": 1,
+                    "insightShare": 2,
+                    "keyboardMove": 0,
+                    "zen": 1,
+                    "moveEvent": 2,
+                    "rookCastle": 0
+                },
+                "language": "testLanguage"
+            }"#;
+
             let (client, server) = test_util::setup_wiremock_test().await;
 
             Mock::given(method("GET"))
-                .and(path("/user/testId"))
+                .and(path("/account/preferences"))
                 .respond_with(ResponseTemplate::new(200)
-                    .set_body_string(get_test_user_json()))
+                    .set_body_string(preferences_json))
                 .expect(1)
                 .mount(&server)
                 .await;
 
-            let result = client.get_profile("testId".to_owned()).await;
+            let result = client.get_my_preferences().await;
 
-            assert_that!(result).contains_value(get_test_user());
+            assert_that!(result).contains_value(preferences);
         })
     }
 }
