@@ -1,13 +1,14 @@
-pub mod event;
-
 use serde::{Deserialize, Deserializer};
 use serde::de::Error as DeserializeError;
 use std::ops::Deref;
 use thiserror::Error;
-use event::GameEventPlayer;
 
 use crate::model::{Seconds, Timestamp};
+use crate::model::game::event::GameEventPlayer;
 use crate::model::user::UserId;
+
+pub mod chat;
+pub mod event;
 
 pub type GameId = String;
 pub type TournamentId = String;

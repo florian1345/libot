@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
 use crate::model::{Move, Seconds};
 use crate::model::challenge::DeclineReason;
-use crate::model::game::event::ChatRoom;
+use crate::model::game::chat::{ChatHistory, ChatRoom};
 use crate::model::game::GameId;
 use crate::model::request::{DeclineRequest, SendChatMessageRequest};
 use crate::model::user::preferences::UserPreferences;
@@ -135,6 +135,12 @@ impl BotClient {
         Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
     }
 
+    pub async fn get_game_chat(&self, game_id: GameId) -> LibotResult<ChatHistory> {
+        let path = format!("/bot/game/{game_id}/chat");
+
+        Ok(self.send_request(Method::GET, &path).await?.json().await?)
+    }
+
     pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
             -> LibotResult<()> {
         let path = format!("/bot/game/{game_id}/chat");
@@ -214,6 +220,7 @@ impl Default for BotClientBuilder {
 
 #[cfg(test)]
 mod tests {
+
     use kernal::prelude::*;
 
     use rstest::rstest;
@@ -221,6 +228,7 @@ mod tests {
     use wiremock::{Mock, ResponseTemplate};
     use wiremock::matchers::{body_json_string, body_string, method, path, query_param};
 
+    use crate::model::game::chat::ChatLine;
     use crate::model::user::{PlayTime, UserProfileStats};
     use crate::model::user::preferences::{
         AutoQueen,
@@ -397,6 +405,62 @@ mod tests {
                 client.make_move("testGameId".to_owned(), "testMove".to_owned(), offer_draw).await;
 
             assert_that!(result).is_ok();
+        });
+    }
+
+    #[rstest]
+    #[case::empty("[]", vec![])]
+    #[case::single_entry(
+        r#"[
+            {
+                "username": "testUsername",
+                "text": "testText"
+            }
+        ]"#,
+        vec![
+            ChatLine {
+                username: "testUsername".to_owned(),
+                text: "testText".to_owned()
+            }
+        ]
+    )]
+    #[case::multiple_entries(
+        r#"[
+            {
+                "username": "testUsername1",
+                "text": "testText1"
+            },
+            {
+                "username": "testUsername2",
+                "text": "testText2"
+            }
+        ]"#,
+        vec![
+            ChatLine {
+                username: "testUsername1".to_owned(),
+                text: "testText1".to_owned()
+            },
+            ChatLine {
+                username: "testUsername2".to_owned(),
+                text: "testText2".to_owned()
+            }
+        ]
+    )]
+    fn get_game_chat(#[case] json: &str, #[case] expected_chat_history: ChatHistory) {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("GET"))
+                .and(path("/bot/game/testGameId/chat"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string(json))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.get_game_chat("testGameId".to_owned()).await;
+
+            assert_that!(result).contains_value(expected_chat_history);
         });
     }
 
