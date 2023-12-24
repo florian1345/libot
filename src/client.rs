@@ -116,25 +116,6 @@ impl BotClient {
         Ok(())
     }
 
-    /// Queries the [UserProfile] of the user with the given name.
-    ///
-    /// # Arguments
-    ///
-    /// * `username`: The username of the user whose profile to query.
-    pub async fn get_profile(&self, username: String) -> LibotResult<UserProfile> {
-        let path = format!("/user/{username}");
-
-        Ok(self.send_request(Method::GET, &path).await?.json().await?)
-    }
-
-    pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
-        Ok(self.send_request(Method::GET, "/account").await?.json().await?)
-    }
-
-    pub async fn get_my_preferences(&self) -> LibotResult<UserPreferences> {
-        Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
-    }
-
     pub async fn get_game_chat(&self, game_id: GameId) -> LibotResult<ChatHistory> {
         let path = format!("/bot/game/{game_id}/chat");
 
@@ -152,6 +133,51 @@ impl BotClient {
         self.send_request_with_form(Method::POST, &path, body).await?;
 
         Ok(())
+    }
+
+    /// Aborts a game which is currently being played and in which this bot is participating.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game to resign.
+    pub async fn abort_game(&self, game_id: GameId) -> LibotResult<()> {
+        let path = format!("/bot/game/{game_id}/abort");
+
+        self.send_request(Method::POST, &path).await?;
+
+        Ok(())
+    }
+
+    /// Resign a game which is currently being played and in which this bot is participating.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game to resign.
+    pub async fn resign_game(&self, game_id: GameId) -> LibotResult<()> {
+        let path = format!("/bot/game/{game_id}/resign");
+
+        self.send_request(Method::POST, &path).await?;
+
+        Ok(())
+    }
+
+    /// Queries the [UserProfile] of the user with the given name.
+    ///
+    /// # Arguments
+    ///
+    /// * `username`: The username of the user whose profile to query.
+    pub async fn get_profile(&self, username: String) -> LibotResult<UserProfile> {
+        let path = format!("/user/{username}");
+
+        Ok(self.send_request(Method::GET, &path).await?.json().await?)
+    }
+
+    pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
+        Ok(self.send_request(Method::GET, "/account").await?.json().await?)
+    }
+
+    pub async fn get_my_preferences(&self) -> LibotResult<UserPreferences> {
+        Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
     }
 
     /// Adds time to the opponent's clock.
@@ -479,6 +505,42 @@ mod tests {
 
             let result = client
                 .send_chat_message("testGameId".to_owned(), ChatRoom::Player, "testText").await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn abort_game() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/abort"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.abort_game("testGameId".to_owned()).await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn resign_game() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/resign"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.resign_game("testGameId".to_owned()).await;
 
             assert_that!(result).is_ok();
         });
