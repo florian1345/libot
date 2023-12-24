@@ -579,7 +579,7 @@ mod tests {
                 replay: Replay::Always,
                 challenge: ChallengeFilter::OnlyFriends,
                 message: MessageFilter::OnlyExistingConversations,
-                submit_move: MoveConfirmations::EMPTY,
+                move_confirmations: MoveConfirmations::EMPTY,
                 confirm_resign: true,
                 insight_share: InsightShare::WithEverybody,
                 keyboard_move: false,
