@@ -1,4 +1,7 @@
-use serde::Deserialize;
+use std::ops::{BitOr, BitOrAssign};
+use serde::{Deserialize, Deserializer};
+use serde::de::Error as DeserializeError;
+use serde_repr::Deserialize_repr;
 
 use crate::model::Url;
 
@@ -9,11 +12,199 @@ pub type PieceSet3d = String;
 pub type SoundSet = String;
 pub type Language = String;
 
+/// Preference for piece animation.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum PieceAnimation {
+    None = 0,
+    Fast = 1,
+    Normal = 2,
+    Slow = 3
+}
+
+/// Preference for automatically promoting to Queen.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum AutoQueen {
+    Never = 1,
+    WhenPreMoving = 2,
+    Always = 3
+}
+
+/// Preference for automatically claiming draw on threefold repetition.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum AutoThreefold {
+    Never = 1,
+    WhenLessThan30Seconds = 2,
+    Always = 3
+}
+
+/// Preference for which players to let challenge you.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum ChallengeFilter {
+    Never = 1,
+    IfRatingWithin300 = 2,
+    OnlyFriends = 3,
+    IfRegistered = 4,
+    Always = 5
+}
+
+/// Preference for displaying tenths of seconds on the clock.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum ClockTenths {
+    Never = 0,
+    WhenLessThan10Seconds = 1,
+    Always = 2
+}
+
+/// Preference for displaying board coordinates (A-H, 1-8).
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum Coordinates {
+
+    /// Do not display coordinates.
+    None = 0,
+
+    /// Display coordinates inside the board.
+    Inside = 1,
+
+    /// Display coordinates outside the board.
+    Outside = 2
+}
+
+/// Preference for sharing your Chess insights data.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum InsightShare {
+    WithNobody = 0,
+    WithFriends = 1,
+    WithEverybody = 2
+}
+
+/// Preference for which players to let message you.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum MessageFilter {
+    OnlyExistingConversations = 1,
+    OnlyFriends = 2,
+    Always = 3
+}
+
+/// Preference for giving more time.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum MoreTime {
+    Never = 1,
+    CasualOnly = 2,
+    Always = 3
+}
+
+/// Preference for how you move pieces.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum MoveEvent {
+    ClickTwoSquares = 0,
+    DragPiece = 1,
+    Either = 2
+}
+
+/// Preference for displaying a move list while playing.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum Replay {
+    Never = 0,
+    SlowGames = 1,
+    Always = 2
+}
+
+/// Preference for castling method.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum CastlingMethod {
+    KingTwoSquares = 0,
+    KingOntoRook = 1
+}
+
+/// Preference for take backs with opponent approval.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum TakeBack {
+    Never = 1,
+    CasualOnly = 2,
+    Always = 3
+}
+
+/// Preference for activating Zen mode.
+#[derive(Clone, Copy, Debug, Deserialize_repr, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum ZenMode {
+    No = 0,
+    Yes = 1,
+    InGameOnly = 2
+}
+
+/// Preferences on whether moves have to be confirmed depending on the time control.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct MoveConfirmations(u8);
+
+impl MoveConfirmations {
+    pub const EMPTY: MoveConfirmations = MoveConfirmations(0);
+    pub const UNLIMITED: MoveConfirmations = MoveConfirmations(1);
+    pub const CORRESPONDENCE: MoveConfirmations = MoveConfirmations(2);
+    pub const CLASSICAL: MoveConfirmations = MoveConfirmations(4);
+    pub const RAPID: MoveConfirmations = MoveConfirmations(8);
+    pub const BLITZ: MoveConfirmations = MoveConfirmations(16);
+
+    fn contains(self, mask: MoveConfirmations) -> bool {
+        self.0 & mask.0 != 0
+    }
+
+    /// Indicates whether move confirmation is required in Unlimited time control.
+    pub fn for_unlimited(self) -> bool {
+        self.contains(Self::UNLIMITED)
+    }
+
+    /// Indicates whether move confirmation is required in Correspondence time control.
+    pub fn for_correspondence(self) -> bool {
+        self.contains(Self::CORRESPONDENCE)
+    }
+
+    /// Indicates whether move confirmation is required in Classical time control.
+    pub fn for_classical(self) -> bool {
+        self.contains(Self::CLASSICAL)
+    }
+
+    /// Indicates whether move confirmation is required in Rapid time control.
+    pub fn for_rapid(self) -> bool {
+        self.contains(Self::RAPID)
+    }
+
+    /// Indicates whether move confirmation is required in Blitz time control.
+    pub fn for_blitz(self) -> bool {
+        self.contains(Self::BLITZ)
+    }
+}
+
+impl BitOr for MoveConfirmations {
+    type Output = MoveConfirmations;
+
+    fn bitor(self, rhs: MoveConfirmations) -> MoveConfirmations {
+        MoveConfirmations(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for MoveConfirmations {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserPreferencesNoLanguage {
-
-    // TODO some fields may be optional here?
 
     #[serde(default)]
     dark: bool,
@@ -32,18 +223,17 @@ struct UserPreferencesNoLanguage {
     piece_set_3d: PieceSet3d,
     sound_set: SoundSet,
 
-    // TODO resolve i32 to options
-
-    blindfold: i32,
-    auto_queen: i32,
-    auto_threefold: i32,
+    #[serde(deserialize_with = "deserialize_bool_from_integer")]
+    blindfold: bool,
+    auto_queen: AutoQueen,
+    auto_threefold: AutoThreefold,
 
     #[serde(rename = "takeback")]
-    take_back: i32,
+    take_back: TakeBack,
 
     #[serde(rename = "moretime")]
-    more_time: i32,
-    clock_tenths: i32,
+    more_time: MoreTime,
+    clock_tenths: ClockTenths,
 
     #[serde(default)]
     clock_bar: bool,
@@ -53,7 +243,7 @@ struct UserPreferencesNoLanguage {
 
     #[serde(default)]
     premove: bool,
-    animation: i32,
+    animation: PieceAnimation,
 
     #[serde(default)]
     captured: bool,
@@ -66,18 +256,39 @@ struct UserPreferencesNoLanguage {
 
     #[serde(default)]
     destination: bool,
-    coords: i32,
-    replay: i32,
-    challenge: i32,
-    message: i32,
-    coord_color: i32,
-    submit_move: i32,
-    confirm_resign: i32,
-    insight_share: i32,
-    keyboard_move: i32,
-    zen: i32,
-    move_event: i32,
-    rook_castle: i32,
+    coords: Coordinates,
+    replay: Replay,
+    challenge: ChallengeFilter,
+    message: MessageFilter,
+    submit_move: MoveConfirmations,
+
+    #[serde(deserialize_with = "deserialize_bool_from_integer")]
+    confirm_resign: bool,
+    insight_share: InsightShare,
+
+    #[serde(deserialize_with = "deserialize_bool_from_integer")]
+    keyboard_move: bool,
+    zen: ZenMode,
+
+    #[serde(deserialize_with = "deserialize_bool_from_integer")]
+    ratings: bool,
+    move_event: MoveEvent,
+
+    #[serde(rename = "rookCastle")]
+    castling_method: CastlingMethod
+}
+
+fn deserialize_bool_from_integer<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>
+{
+    let integer = i64::deserialize(deserializer)?;
+
+    match integer {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(DeserializeError::custom(format!("invalid integer for bool: {}", integer)))
+    }
 }
 
 #[derive(Deserialize)]
@@ -98,32 +309,32 @@ pub struct UserPreferences {
     pub theme_3d: Theme3d,
     pub piece_set_3d: PieceSet3d,
     pub sound_set: SoundSet,
-    pub blindfold: i32,
-    pub auto_queen: i32,
-    pub auto_threefold: i32,
-    pub take_back: i32,
-    pub more_time: i32,
-    pub clock_tenths: i32,
+    pub blindfold: bool,
+    pub auto_queen: AutoQueen,
+    pub auto_threefold: AutoThreefold,
+    pub take_back: TakeBack,
+    pub more_time: MoreTime,
+    pub clock_tenths: ClockTenths,
     pub clock_bar: bool,
     pub clock_sound: bool,
     pub premove: bool,
-    pub animation: i32,
+    pub animation: PieceAnimation,
     pub captured: bool,
     pub follow: bool,
     pub highlight: bool,
     pub destination: bool,
-    pub coords: i32,
-    pub replay: i32,
-    pub challenge: i32,
-    pub message: i32,
-    pub coord_color: i32,
-    pub submit_move: i32,
-    pub confirm_resign: i32,
-    pub insight_share: i32,
-    pub keyboard_move: i32,
-    pub zen: i32,
-    pub move_event: i32,
-    pub rook_castle: i32,
+    pub coords: Coordinates,
+    pub replay: Replay,
+    pub challenge: ChallengeFilter,
+    pub message: MessageFilter,
+    pub submit_move: MoveConfirmations,
+    pub confirm_resign: bool,
+    pub insight_share: InsightShare,
+    pub keyboard_move: bool,
+    pub zen: ZenMode,
+    pub ratings: bool,
+    pub move_event: MoveEvent,
+    pub castling_method: CastlingMethod,
     pub language: Language
 }
 
@@ -157,14 +368,14 @@ impl From<UserPreferencesNested> for UserPreferences {
             replay: nested.prefs.replay,
             challenge: nested.prefs.challenge,
             message: nested.prefs.message,
-            coord_color: nested.prefs.coord_color,
             submit_move: nested.prefs.submit_move,
             confirm_resign: nested.prefs.confirm_resign,
             insight_share: nested.prefs.insight_share,
             keyboard_move: nested.prefs.keyboard_move,
             zen: nested.prefs.zen,
+            ratings: nested.prefs.ratings,
             move_event: nested.prefs.move_event,
-            rook_castle: nested.prefs.rook_castle,
+            castling_method: nested.prefs.castling_method,
             language: nested.language
         }
     }
