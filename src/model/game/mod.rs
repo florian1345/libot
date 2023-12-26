@@ -1,11 +1,10 @@
 use serde::{Deserialize, Deserializer};
 use serde::de::Error as DeserializeError;
-use std::ops::Deref;
+
 use thiserror::Error;
 
 use crate::model::{Seconds, Timestamp};
 use crate::model::game::event::GameEventPlayer;
-use crate::model::user::UserId;
 
 pub mod chat;
 pub mod event;
@@ -161,27 +160,6 @@ pub struct GameInfo {
     pub black: GameEventPlayer,
     pub initial_fen: Fen,
     pub tournament_id: Option<TournamentId>
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct GameContext {
-
-    /// The [Color] as which this bot plays, or [None] if it is not a participant.
-    pub bot_color: Option<Color>,
-
-    /// The [UserId] of this bot's user.
-    pub bot_id: UserId,
-
-    pub(crate) info: GameInfo
-}
-
-impl Deref for GameContext {
-
-    type Target = GameInfo;
-
-    fn deref(&self) -> &Self::Target {
-        &self.info
-    }
 }
 
 // TODO avoid expensive clone with IDs?
