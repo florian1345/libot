@@ -161,6 +161,22 @@ impl BotClient {
         Ok(())
     }
 
+    pub async fn offer_or_accept_draw(&self, game_id: GameId) -> LibotResult<()> {
+        let path = format!("/bot/game/{game_id}/draw/yes");
+
+        self.send_request(Method::POST, &path).await?;
+
+        Ok(())
+    }
+
+    pub async fn decline_draw(&self, game_id: GameId) -> LibotResult<()> {
+        let path = format!("/bot/game/{game_id}/draw/no");
+
+        self.send_request(Method::POST, &path).await?;
+
+        Ok(())
+    }
+
     /// Queries the [UserProfile] of the user with the given name.
     ///
     /// # Arguments
@@ -541,6 +557,42 @@ mod tests {
                 .await;
 
             let result = client.resign_game("testGameId".to_owned()).await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn offer_or_accept_draw() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/draw/yes"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.offer_or_accept_draw("testGameId".to_owned()).await;
+
+            assert_that!(result).is_ok();
+        });
+    }
+
+    #[test]
+    fn decline_draw() {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("POST"))
+                .and(path("/bot/game/testGameId/draw/no"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.decline_draw("testGameId".to_owned()).await;
 
             assert_that!(result).is_ok();
         });
