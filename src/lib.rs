@@ -10,17 +10,19 @@ use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
 use reqwest::Method;
 
 use tokio::task;
-use model::bot_event::{BotEvent, ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
-use model::game::{Color, GameContext, GameId, GameInfo};
-use model::game::event::{ChatLineEvent, GameEvent, GameStateEvent, OpponentGoneEvent};
-use model::user::UserId;
 
 use crate::client::BotClient;
+use crate::context::{BotContext, GameContext};
 use crate::error::LibotResult;
+use crate::model::bot_event::{BotEvent, ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
+use crate::model::game::{Color, GameId, GameInfo};
+use crate::model::game::event::{ChatLineEvent, GameEvent, GameStateEvent, OpponentGoneEvent};
+use crate::model::user::UserId;
 
 pub mod model;
 pub mod error;
 pub mod client;
+pub mod context;
 
 #[cfg(test)]
 pub(crate) mod test_util;
@@ -28,16 +30,20 @@ pub(crate) mod test_util;
 #[async_trait::async_trait]
 pub trait Bot : Sync {
 
-    async fn on_game_start(&self, _game: GameStartFinishEvent, _client: &BotClient) { }
+    async fn on_game_start(&self, _context: &BotContext, _game: GameStartFinishEvent,
+        _client: &BotClient) { }
 
-    async fn on_game_finish(&self, _game: GameStartFinishEvent, _client: &BotClient) { }
+    async fn on_game_finish(&self, _context: &BotContext, _game: GameStartFinishEvent,
+        _client: &BotClient) { }
 
-    async fn on_challenge(&self, _challenge: ChallengeEvent, _client: &BotClient) { }
+    async fn on_challenge(&self, _context: &BotContext, _challenge: ChallengeEvent,
+        _client: &BotClient) { }
 
-    async fn on_challenge_cancelled(&self, _challenge: ChallengeEvent, _client: &BotClient) { }
+    async fn on_challenge_cancelled(&self, _context: &BotContext, _challenge: ChallengeEvent,
+        _client: &BotClient) { }
 
-    async fn on_challenge_declined(&self, _challenge: ChallengeDeclinedEvent, _client: &BotClient)
-        { }
+    async fn on_challenge_declined(&self, _context: &BotContext, _challenge: ChallengeDeclinedEvent,
+        _client: &BotClient) { }
 
     async fn on_game_state(&self, _context: &GameContext, _state: GameStateEvent,
         _client: &BotClient) { }
@@ -123,12 +129,12 @@ where
 }
 
 async fn process_bot_event(event: BotEvent, bot: Arc<impl Bot + Send + 'static>,
-        client: BotClient, bot_id: UserId) {
+        client: BotClient, context: &BotContext) {
     // TODO enable error handling
     match event {
         BotEvent::GameStart(game) => {
             let game_id = game.id.clone();
-            bot.as_ref().on_game_start(game, &client).await;
+            bot.as_ref().on_game_start(context, game, &client).await;
 
             if let Some(game_id) = game_id {
                 let event_path = game_event_path(&game_id);
@@ -139,18 +145,18 @@ async fn process_bot_event(event: BotEvent, bot: Arc<impl Bot + Send + 'static>,
                         ndjson_stream::from_fallible_stream_with_config::<GameEvent, _>(
                             response.bytes_stream(), ndjson_config());
 
-                    run_with_game_event_stream(bot, stream, client, bot_id).await
+                    run_with_game_event_stream(bot, stream, client, context.bot_id.clone()).await
                 }
             }
         },
         BotEvent::GameFinish(game) =>
-            bot.as_ref().on_game_finish(game, &client).await,
+            bot.as_ref().on_game_finish(context, game, &client).await,
         BotEvent::Challenge(challenge) =>
-            bot.as_ref().on_challenge(challenge, &client).await,
+            bot.as_ref().on_challenge(context, challenge, &client).await,
         BotEvent::ChallengeCanceled(challenge) =>
-            bot.as_ref().on_challenge_cancelled(challenge, &client).await,
+            bot.as_ref().on_challenge_cancelled(context, challenge, &client).await,
         BotEvent::ChallengeDeclined(challenge) =>
-            bot.as_ref().on_challenge_declined(challenge, &client).await
+            bot.as_ref().on_challenge_declined(context, challenge, &client).await
     }
 }
 
@@ -159,13 +165,17 @@ async fn run_with_event_stream<E>(bot: Arc<impl Bot + Send + 'static>,
 where
     E: Debug + Send + 'static
 {
-    event_stream.map(|record| {
+    let context = Arc::new(BotContext {
+        bot_id
+    });
+
+    event_stream.map(move |record| {
         let bot = Arc::clone(&bot);
         let client = client.clone();
-        let bot_id = bot_id.clone();
+        let context = Arc::clone(&context);
 
         task::spawn(async move {
-            process_bot_event(record.unwrap(), bot, client, bot_id).await;
+            process_bot_event(record.unwrap(), bot, client, context.as_ref()).await;
         })
     }).for_each_concurrent(None, |join_handle| async { join_handle.await.unwrap() }).await;
 }
@@ -220,23 +230,25 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Bot for MockBot {
-        async fn on_game_start(&self, game: GameStartFinishEvent, _: &BotClient) {
+        async fn on_game_start(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::GameStart(game));
         }
 
-        async fn on_game_finish(&self, game: GameStartFinishEvent, _: &BotClient) {
+        async fn on_game_finish(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::GameFinish(game));
         }
 
-        async fn on_challenge(&self, challenge: ChallengeEvent, _: &BotClient) {
+        async fn on_challenge(&self, _: &BotContext, challenge: ChallengeEvent, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::Challenge(challenge));
         }
 
-        async fn on_challenge_cancelled(&self, challenge: ChallengeEvent, _: &BotClient) {
+        async fn on_challenge_cancelled(&self, _: &BotContext, challenge: ChallengeEvent,
+                _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeCanceled(challenge));
         }
 
-        async fn on_challenge_declined(&self, challenge: ChallengeDeclinedEvent, _: &BotClient) {
+        async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclinedEvent,
+                _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
         }
 
