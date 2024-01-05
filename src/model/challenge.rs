@@ -32,6 +32,8 @@ pub enum ChallengeDirection {
     Out
 }
 
+/// An enumeration of the different reasons a bot can give why it rejected a challenge. This is
+/// displayed to the challenger so they can potentially formulate a more conforming challenge.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DeclineReason {

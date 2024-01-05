@@ -15,13 +15,15 @@ use crate::model::request::{DeclineRequest, SendChatMessageRequest};
 use crate::model::user::preferences::UserPreferences;
 use crate::model::user::UserProfile;
 
+/// The Lichess API client to use for a bot. Each method call on this client represents a coll to
+/// one Lichess API endpoint.
 #[derive(Clone, Debug)]
 pub struct BotClient {
     client: Client,
     base_url: Arc<str>
 }
 
-pub fn join_url(base_url: &str, path: &str) -> String {
+pub(crate) fn join_url(base_url: &str, path: &str) -> String {
     let mut url = base_url.to_owned();
 
     if url.ends_with('/') {
@@ -83,6 +85,11 @@ impl BotClient {
         handle_error(self.client.request(method, url).query(&query).send().await).await
     }
 
+    /// Accepts the challenge with the given ID. A new game will start as a result.
+    ///
+    /// # Arguments
+    ///
+    /// * `challenge_id`: The ID of the challenge to accept.
     pub async fn accept_challenge(&self, challenge_id: GameId) -> LibotResult<()> {
         let path = format!("/challenge/{challenge_id}/accept");
         self.send_request(Method::POST, &path).await?;
@@ -90,6 +97,14 @@ impl BotClient {
         Ok(())
     }
 
+    /// Declines the challenge with the given ID. A reason why the challenge was declined can be
+    /// provided.
+    ///
+    /// # Arguments
+    ///
+    /// * `challenge_id`: The ID of the challenge to decline.
+    /// * `reason`: If present, this reason why the challenge was declined will be provided to the
+    /// challenger.
     pub async fn decline_challenge(&self, challenge_id: GameId, reason: Option<DeclineReason>)
             -> LibotResult<()> {
         let path = format!("/challenge/{challenge_id}/decline");
@@ -101,6 +116,15 @@ impl BotClient {
         Ok(())
     }
 
+    /// Makes the given move in the game with the given ID. Additionally, it is possible to offer a
+    /// draw or accept a pending draw offer by setting the `offer_draw` flag. This is equivalent to
+    /// calling [BotClient::offer_or_accept_draw] at the same time.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game in which to play a move.
+    /// * `mov`: The move to play.
+    /// * `offer_draw`: If `true`, the bot will offer a draw or accept a pending draw offer.
     pub async fn make_move(&self, game_id: GameId, mov: Move, offer_draw: bool) -> LibotResult<()> {
         #[derive(Serialize)]
         struct OfferDraw {
@@ -116,12 +140,24 @@ impl BotClient {
         Ok(())
     }
 
+    /// Fetches the entire [ChatHistory] of a given game.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game whose chat history to fetch.
     pub async fn get_game_chat(&self, game_id: GameId) -> LibotResult<ChatHistory> {
         let path = format!("/bot/game/{game_id}/chat");
 
         Ok(self.send_request(Method::GET, &path).await?.json().await?)
     }
 
+    /// Sends a chat message in a game chat as the user as which this bot is authenticated.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game in whose chat to post a message.
+    /// * `room`: The chat room (player/spectator) in which to post the message.
+    /// * `text`: The text of the chat message to send.
     pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
             -> LibotResult<()> {
         let path = format!("/bot/game/{game_id}/chat");
@@ -161,6 +197,12 @@ impl BotClient {
         Ok(())
     }
 
+    /// Offers a draw in a game or, if the opponent has a pending draw offer in the game, accepts
+    /// that draw offer.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game in which to offer a draw or accept a draw offer.
     pub async fn offer_or_accept_draw(&self, game_id: GameId) -> LibotResult<()> {
         let path = format!("/bot/game/{game_id}/draw/yes");
 
@@ -169,6 +211,11 @@ impl BotClient {
         Ok(())
     }
 
+    /// Declines a pending draw offer in a game.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game in which to decline a draw offer.
     pub async fn decline_draw(&self, game_id: GameId) -> LibotResult<()> {
         let path = format!("/bot/game/{game_id}/draw/no");
 
@@ -188,10 +235,12 @@ impl BotClient {
         Ok(self.send_request(Method::GET, &path).await?.json().await?)
     }
 
+    /// Queries the [UserProfile] of the user as which this bot is authenticated.
     pub async fn get_my_profile(&self) -> LibotResult<UserProfile> {
         Ok(self.send_request(Method::GET, "/account").await?.json().await?)
     }
 
+    /// Queries the [UserPreferences] of the user as which this bot is authenticated.
     pub async fn get_my_preferences(&self) -> LibotResult<UserPreferences> {
         Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
     }
@@ -210,8 +259,12 @@ impl BotClient {
     }
 }
 
+/// The URL used by default as the base URL, if no other base URL is provided using
+/// [BotClientBuilder::with_base_url]. This is the public production instance of Lichess.
 pub const DEFAULT_BASE_URL: &str = "https://lichess.org/api";
 
+/// A builder for [BotClient]s.
+#[derive(Clone, Debug)]
 pub struct BotClientBuilder {
     token: Option<String>,
     base_url: String
@@ -219,6 +272,8 @@ pub struct BotClientBuilder {
 
 impl BotClientBuilder {
 
+    /// Creates a new builder with default values. A token must be provided using
+    /// [BotClientBuilder::with_token] before [BotClientBuilder::build] can be called.
     pub fn new() -> BotClientBuilder {
         BotClientBuilder {
             token: None,
@@ -226,16 +281,29 @@ impl BotClientBuilder {
         }
     }
 
+    /// Sets the Lichess API OAuth token for the bot to use. The builder is returned for chaining.
     pub fn with_token(mut self, token: impl Into<String>) -> BotClientBuilder {
         self.token = Some(token.into());
         self
     }
 
+    /// Sets the base URL of the Lichess API with which the client should communicate. The builder
+    /// is returned for chaining. By default, i.e. if this method is not called, the base URL is
+    /// [DEFAULT_BASE_URL]. The builder is returned for chaining.
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> BotClientBuilder {
         self.base_url = base_url.into();
         self
     }
 
+    /// Builds a new Lichess bot client from the provided information. At least a token must be
+    /// provided, i.e. [BotClientBuilder::with_token] must have been called.
+    ///
+    /// # Errors
+    ///
+    /// * [BotClientBuilderError::InvalidToken] if it is not possible to parse the provided token
+    /// into a HTTP header value.
+    /// * [BotClientBuilderError::ClientError] if creating the `reqwest` client failed.
+    /// * [BotClientBuilderError::NoToken] if no token was provided.
     pub fn build(self) -> BotClientBuilderResult {
         if let Some(token) = self.token {
             let mut headers = HeaderMap::new();

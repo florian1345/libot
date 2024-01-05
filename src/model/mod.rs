@@ -10,7 +10,10 @@ pub mod challenge;
 pub mod bot_event;
 pub(crate) mod request;
 
+/// A Chess move in UCI notation.
 pub type Move = String;
+
+/// A space-separated list of Chess moves in UCI notation.
 pub type Moves = String;
 pub type Url = String;
 pub type Milliseconds = i64;
