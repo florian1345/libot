@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::model::game::{deserialize_optional_variant, Fen, GameId, Speed, Variant};
+use crate::model::{TimeControl, Url};
+use crate::model::user::User;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ChallengeStatus {
@@ -70,4 +74,42 @@ pub enum DeclineReason {
 
     /// Indicates that the bot only accepts challenges from other bots.
     OnlyBot
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Challenge {
+    pub id: GameId,
+    pub url: Url,
+    pub status: ChallengeStatus,
+    pub challenger: User,
+    pub dest_user: Option<User>,
+
+    // TODO really optional?
+    #[serde(deserialize_with = "deserialize_optional_variant")]
+    pub variant: Option<Variant>,
+    pub rated: bool,
+    pub speed: Speed,
+    pub time_control: TimeControl,
+    pub color: ChallengeColor,
+    pub perf: ChallengePerf,
+    pub direction: Option<ChallengeDirection>,
+    pub initial_fen: Option<Fen>,
+    pub decline_reason: Option<String>, // TODO unify with key?
+    pub decline_reason_key: Option<DeclineReason>
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct ChallengeDeclined {
+    pub id: GameId
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+pub struct Challenges {
+
+    #[serde(default, rename = "in")]
+    pub incoming: Vec<Challenge>,
+
+    #[serde(default, rename = "out")]
+    pub outgoing: Vec<Challenge>
 }

@@ -1,28 +1,17 @@
 use serde::{Deserialize, Deserializer};
 
-use crate::model::challenge::{
-    ChallengeColor,
-    ChallengeDirection,
-    ChallengePerf,
-    ChallengeStatus,
-    DeclineReason
-};
-use crate::model::{Compat, TimeControl, Url};
+use crate::model::challenge::{Challenge, ChallengeDeclined};
+use crate::model::Compat;
 use crate::model::game::event::GameEventSource;
 use crate::model::game::{
-    deserialize_game_status_from_object,
-    deserialize_optional_variant,
     Color,
-    Fen,
+    deserialize_game_status_from_object,
     GameId,
-    GameStatus,
-    Speed,
-    Variant
+    GameStatus
 };
-use crate::model::user::User;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-pub struct GameStartFinishEvent {
+pub struct GameStartFinish {
     // TODO really so many options?
     pub id: Option<GameId>,
     pub source: Option<GameEventSource>,
@@ -33,41 +22,13 @@ pub struct GameStartFinishEvent {
     pub compat: Option<Compat>
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ChallengeEvent {
-    pub id: GameId,
-    pub url: Url,
-    pub status: ChallengeStatus,
-    pub challenger: User,
-    pub dest_user: Option<User>,
-
-    // TODO really optional?
-    #[serde(deserialize_with = "deserialize_optional_variant")]
-    pub variant: Option<Variant>,
-    pub rated: bool,
-    pub speed: Speed,
-    pub time_control: TimeControl,
-    pub color: ChallengeColor,
-    pub perf: ChallengePerf,
-    pub direction: Option<ChallengeDirection>,
-    pub initial_fen: Option<Fen>,
-    pub decline_reason: Option<String>, // TODO unify with key?
-    pub decline_reason_key: Option<DeclineReason>
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-pub struct ChallengeDeclinedEvent {
-    pub id: GameId
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum BotEvent {
-    GameStart(GameStartFinishEvent),
-    GameFinish(GameStartFinishEvent),
-    Challenge(ChallengeEvent),
-    ChallengeCanceled(ChallengeEvent),
-    ChallengeDeclined(ChallengeDeclinedEvent)
+    GameStart(GameStartFinish),
+    GameFinish(GameStartFinish),
+    Challenge(Challenge),
+    ChallengeCanceled(Challenge),
+    ChallengeDeclined(ChallengeDeclined)
 }
 
 impl<'de> Deserialize<'de> for BotEvent {
@@ -76,19 +37,19 @@ impl<'de> Deserialize<'de> for BotEvent {
         #[serde(tag = "type", rename_all = "camelCase")]
         enum Wrapper {
             GameStart {
-                game: GameStartFinishEvent
+                game: GameStartFinish
             },
             GameFinish {
-                game: GameStartFinishEvent
+                game: GameStartFinish
             },
             Challenge {
-                challenge: ChallengeEvent
+                challenge: Challenge
             },
             ChallengeCanceled {
-                challenge: ChallengeEvent
+                challenge: Challenge
             },
             ChallengeDeclined {
-                challenge: ChallengeDeclinedEvent
+                challenge: ChallengeDeclined
             }
         }
 
@@ -109,8 +70,16 @@ mod tests {
 
     use rstest::rstest;
 
-    use crate::model::game::Clock;
-    use crate::model::user::Title;
+    use crate::model::TimeControl;
+    use crate::model::challenge::{
+        ChallengeColor,
+        ChallengeDirection,
+        ChallengePerf,
+        ChallengeStatus,
+        DeclineReason
+    };
+    use crate::model::game::{Clock, Speed, Variant};
+    use crate::model::user::{Title, User};
 
     use super::*;
 
@@ -132,7 +101,7 @@ mod tests {
             "type": "gameStart",
             "game": { }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: None,
             source: None,
             status: None,
@@ -147,7 +116,7 @@ mod tests {
                 "id": "test"
             }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: Some("test".to_owned()),
             source: None,
             status: None,
@@ -162,7 +131,7 @@ mod tests {
                 "source": "friend"
             }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: None,
             source: Some(GameEventSource::Friend),
             status: None,
@@ -180,7 +149,7 @@ mod tests {
                 }
             }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: None,
             source: None,
             status: Some(GameStatus::Created),
@@ -195,7 +164,7 @@ mod tests {
                 "winner": "white"
             }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: None,
             source: None,
             status: None,
@@ -210,7 +179,7 @@ mod tests {
                 "compat": { }
             }
         }"#,
-        BotEvent::GameStart(GameStartFinishEvent {
+        BotEvent::GameStart(GameStartFinish {
             id: None,
             source: None,
             status: None,
@@ -231,7 +200,7 @@ mod tests {
                 }
             }
         }"#,
-        BotEvent::GameFinish(GameStartFinishEvent {
+        BotEvent::GameFinish(GameStartFinish {
             id: None,
             source: None,
             status: None,
@@ -264,7 +233,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::Challenge(ChallengeEvent {
+        BotEvent::Challenge(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -320,7 +289,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::Challenge(ChallengeEvent {
+        BotEvent::Challenge(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -374,7 +343,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::Challenge(ChallengeEvent {
+        BotEvent::Challenge(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -436,7 +405,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::Challenge(ChallengeEvent {
+        BotEvent::Challenge(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -481,7 +450,7 @@ mod tests {
                 }
             }
         }"#,
-        BotEvent::Challenge(ChallengeEvent {
+        BotEvent::Challenge(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -527,7 +496,7 @@ mod tests {
                 "declineReasonKey": "noBot"
             }
         }"#,
-        BotEvent::ChallengeCanceled(ChallengeEvent {
+        BotEvent::ChallengeCanceled(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -572,7 +541,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::ChallengeCanceled(ChallengeEvent {
+        BotEvent::ChallengeCanceled(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -618,7 +587,7 @@ mod tests {
                 "perf": { }
             }
         }"#,
-        BotEvent::ChallengeCanceled(ChallengeEvent {
+        BotEvent::ChallengeCanceled(Challenge {
             id: "testId".to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -648,7 +617,7 @@ mod tests {
                 "id": "testId"
             }
         }"#,
-        BotEvent::ChallengeDeclined(ChallengeDeclinedEvent {
+        BotEvent::ChallengeDeclined(ChallengeDeclined {
             id: "testId".to_owned()
         })
     )]
