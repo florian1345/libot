@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::error::{BotClientBuilderError, BotClientBuilderResult, LibotRequestError, LibotResult};
 use crate::model::{Move, Seconds};
-use crate::model::challenge::DeclineReason;
+use crate::model::challenge::{Challenges, DeclineReason};
 use crate::model::game::chat::{ChatHistory, ChatRoom};
 use crate::model::game::GameId;
 use crate::model::request::{DeclineRequest, SendChatMessageRequest};
@@ -85,6 +85,11 @@ impl BotClient {
         handle_error(self.client.request(method, url).query(&query).send().await).await
     }
 
+    /// Queries a list of all pending challenges created by or targeted at the bot.
+    pub async fn get_pending_challenges(&self) -> LibotResult<Challenges> {
+        Ok(self.send_request(Method::GET, "/challenge").await?.json().await?)
+    }
+
     /// Accepts the challenge with the given ID. A new game will start as a result.
     ///
     /// # Arguments
@@ -136,37 +141,6 @@ impl BotClient {
         let query = OfferDraw { offer_draw };
 
         self.send_request_with_query(Method::POST, &path, query).await?;
-
-        Ok(())
-    }
-
-    /// Fetches the entire [ChatHistory] of a given game.
-    ///
-    /// # Arguments
-    ///
-    /// * `game_id`: The ID of the game whose chat history to fetch.
-    pub async fn get_game_chat(&self, game_id: GameId) -> LibotResult<ChatHistory> {
-        let path = format!("/bot/game/{game_id}/chat");
-
-        Ok(self.send_request(Method::GET, &path).await?.json().await?)
-    }
-
-    /// Sends a chat message in a game chat as the user as which this bot is authenticated.
-    ///
-    /// # Arguments
-    ///
-    /// * `game_id`: The ID of the game in whose chat to post a message.
-    /// * `room`: The chat room (player/spectator) in which to post the message.
-    /// * `text`: The text of the chat message to send.
-    pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
-            -> LibotResult<()> {
-        let path = format!("/bot/game/{game_id}/chat");
-        let body = SendChatMessageRequest {
-            room,
-            text: text.into()
-        };
-
-        self.send_request_with_form(Method::POST, &path, body).await?;
 
         Ok(())
     }
@@ -224,6 +198,50 @@ impl BotClient {
         Ok(())
     }
 
+    /// Adds time to the opponent's clock.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: ID of the game in which to give time to the bot's opponent.
+    /// * `seconds`: The number of seconds to give the bot's opponent.
+    pub async fn add_time(&self, game_id: GameId, seconds: Seconds) -> LibotResult<()> {
+        let path = format!("/round/{game_id}/add-time/{seconds}");
+        self.send_request(Method::POST, &path).await?;
+
+        Ok(())
+    }
+
+    /// Fetches the entire [ChatHistory] of a given game.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game whose chat history to fetch.
+    pub async fn get_game_chat(&self, game_id: GameId) -> LibotResult<ChatHistory> {
+        let path = format!("/bot/game/{game_id}/chat");
+
+        Ok(self.send_request(Method::GET, &path).await?.json().await?)
+    }
+
+    /// Sends a chat message in a game chat as the user as which this bot is authenticated.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_id`: The ID of the game in whose chat to post a message.
+    /// * `room`: The chat room (player/spectator) in which to post the message.
+    /// * `text`: The text of the chat message to send.
+    pub async fn send_chat_message(&self, game_id: GameId, room: ChatRoom, text: impl Into<String>)
+        -> LibotResult<()> {
+        let path = format!("/bot/game/{game_id}/chat");
+        let body = SendChatMessageRequest {
+            room,
+            text: text.into()
+        };
+
+        self.send_request_with_form(Method::POST, &path, body).await?;
+
+        Ok(())
+    }
+
     /// Queries the [UserProfile] of the user with the given name.
     ///
     /// # Arguments
@@ -243,19 +261,6 @@ impl BotClient {
     /// Queries the [UserPreferences] of the user as which this bot is authenticated.
     pub async fn get_my_preferences(&self) -> LibotResult<UserPreferences> {
         Ok(self.send_request(Method::GET, "/account/preferences").await?.json().await?)
-    }
-
-    /// Adds time to the opponent's clock.
-    ///
-    /// # Arguments
-    ///
-    /// * `game_id`: ID of the game in which to give time to the bot's opponent.
-    /// * `seconds`: The number of seconds to give the bot's opponent.
-    pub async fn add_time(&self, game_id: GameId, seconds: Seconds) -> LibotResult<()> {
-        let path = format!("/round/{game_id}/add-time/{seconds}");
-        self.send_request(Method::POST, &path).await?;
-
-        Ok(())
     }
 }
 
@@ -337,9 +342,12 @@ mod tests {
 
     use wiremock::{Mock, ResponseTemplate};
     use wiremock::matchers::{body_json_string, body_string, method, path, query_param};
+    use crate::model::challenge::{Challenge, ChallengeColor, ChallengePerf, ChallengeStatus};
 
     use crate::model::game::chat::ChatLine;
-    use crate::model::user::{PlayTime, UserProfileStats};
+    use crate::model::game::Speed;
+    use crate::model::TimeControl;
+    use crate::model::user::{PlayTime, User, UserProfileStats};
     use crate::model::user::preferences::{
         AutoQueen,
         AutoThreefold,
@@ -437,6 +445,122 @@ mod tests {
         let url = join_url(base_url, path);
 
         assert_that!(url.as_str()).is_equal_to("https://lichess.org/api/bot/whatever");
+    }
+
+    fn minimal_challenge() -> Challenge {
+        Challenge {
+            id: "testId".to_owned(),
+            url: "testUrl".to_owned(),
+            status: ChallengeStatus::Created,
+            challenger: User {
+                rating: None,
+                provisional: false,
+                online: false,
+                id: "testChallengerId".to_owned(),
+                name: "testChallengerName".to_owned(),
+                title: None,
+                patron: false
+            },
+            dest_user: None,
+            variant: None,
+            rated: false,
+            speed: Speed::Correspondence,
+            time_control: TimeControl::Unlimited,
+            color: ChallengeColor::Random,
+            perf: ChallengePerf {
+                icon: None,
+                name: None
+            },
+            direction: None,
+            initial_fen: None,
+            decline_reason: None,
+            decline_reason_key: None
+        }
+    }
+
+    #[rstest]
+    #[case::empty(
+        r#"{
+            "in": [],
+            "out": []
+        }"#,
+        Challenges {
+            incoming: Vec::new(),
+            outgoing: Vec::new()
+        }
+    )]
+    #[case::incoming(
+        r#"{
+            "in": [
+                {
+                    "id": "testId",
+                    "url": "testUrl",
+                    "status": "created",
+                    "challenger": {
+                        "id": "testChallengerId",
+                        "name": "testChallengerName"
+                    },
+                    "variant": { },
+                    "rated": false,
+                    "speed": "correspondence",
+                    "timeControl": {
+                        "type": "unlimited"
+                    },
+                    "color": "random",
+                    "perf": {}
+                }
+            ],
+            "out": []
+        }"#,
+        Challenges {
+            incoming: vec![minimal_challenge()],
+            outgoing: Vec::new()
+        }
+    )]
+    #[case::outgoing(
+        r#"{
+            "in": [],
+            "out": [
+                {
+                    "id": "testId",
+                    "url": "testUrl",
+                    "status": "created",
+                    "challenger": {
+                        "id": "testChallengerId",
+                        "name": "testChallengerName"
+                    },
+                    "variant": { },
+                    "rated": false,
+                    "speed": "correspondence",
+                    "timeControl": {
+                        "type": "unlimited"
+                    },
+                    "color": "random",
+                    "perf": {}
+                }
+            ]
+        }"#,
+        Challenges {
+            incoming: Vec::new(),
+            outgoing: vec![minimal_challenge()],
+        }
+    )]
+    fn get_pending_challenges(#[case] json: &str, #[case] expected_challenges: Challenges) {
+        tokio_test::block_on(async {
+            let (client, server) = test_util::setup_wiremock_test().await;
+
+            Mock::given(method("GET"))
+                .and(path("/challenge"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_string(json))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let result = client.get_pending_challenges().await;
+
+            assert_that!(result).contains_value(expected_challenges);
+        });
     }
 
     #[test]

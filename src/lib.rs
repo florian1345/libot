@@ -10,11 +10,12 @@ use ndjson_stream::config::{EmptyLineHandling, NdjsonConfig};
 use reqwest::Method;
 
 use tokio::task;
+use model::challenge::{Challenge, ChallengeDeclined};
 
 use crate::client::BotClient;
 use crate::context::{BotContext, GameContext};
 use crate::error::LibotResult;
-use crate::model::bot_event::{BotEvent, ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
+use crate::model::bot_event::{BotEvent, GameStartFinish};
 use crate::model::game::{Color, GameId, GameInfo};
 use crate::model::game::event::{ChatLineEvent, GameEvent, GameStateEvent, OpponentGoneEvent};
 use crate::model::user::UserId;
@@ -30,19 +31,19 @@ pub(crate) mod test_util;
 #[async_trait::async_trait]
 pub trait Bot : Sync {
 
-    async fn on_game_start(&self, _context: &BotContext, _game: GameStartFinishEvent,
+    async fn on_game_start(&self, _context: &BotContext, _game: GameStartFinish,
         _client: &BotClient) { }
 
-    async fn on_game_finish(&self, _context: &BotContext, _game: GameStartFinishEvent,
+    async fn on_game_finish(&self, _context: &BotContext, _game: GameStartFinish,
         _client: &BotClient) { }
 
-    async fn on_challenge(&self, _context: &BotContext, _challenge: ChallengeEvent,
+    async fn on_challenge(&self, _context: &BotContext, _challenge: Challenge,
         _client: &BotClient) { }
 
-    async fn on_challenge_cancelled(&self, _context: &BotContext, _challenge: ChallengeEvent,
+    async fn on_challenge_cancelled(&self, _context: &BotContext, _challenge: Challenge,
         _client: &BotClient) { }
 
-    async fn on_challenge_declined(&self, _context: &BotContext, _challenge: ChallengeDeclinedEvent,
+    async fn on_challenge_declined(&self, _context: &BotContext, _challenge: ChallengeDeclined,
         _client: &BotClient) { }
 
     async fn on_game_state(&self, _context: &GameContext, _state: GameStateEvent,
@@ -230,24 +231,24 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Bot for MockBot {
-        async fn on_game_start(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
+        async fn on_game_start(&self, _: &BotContext, game: GameStartFinish, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::GameStart(game));
         }
 
-        async fn on_game_finish(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
+        async fn on_game_finish(&self, _: &BotContext, game: GameStartFinish, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::GameFinish(game));
         }
 
-        async fn on_challenge(&self, _: &BotContext, challenge: ChallengeEvent, _: &BotClient) {
+        async fn on_challenge(&self, _: &BotContext, challenge: Challenge, _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::Challenge(challenge));
         }
 
-        async fn on_challenge_cancelled(&self, _: &BotContext, challenge: ChallengeEvent,
+        async fn on_challenge_cancelled(&self, _: &BotContext, challenge: Challenge,
                 _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeCanceled(challenge));
         }
 
-        async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclinedEvent,
+        async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclined,
                 _: &BotClient) {
             self.bot_events.lock().unwrap().push(BotEvent::ChallengeDeclined(challenge));
         }
@@ -280,8 +281,8 @@ mod tests {
         (mock_bot, bot_events, game_events)
     }
 
-    fn test_game_event_info(id: &str) -> GameStartFinishEvent {
-        GameStartFinishEvent {
+    fn test_game_event_info(id: &str) -> GameStartFinish {
+        GameStartFinish {
             id: Some(id.to_owned()),
             source: None,
             status: None,
@@ -290,8 +291,8 @@ mod tests {
         }
     }
 
-    fn test_challenge(id: &str) -> ChallengeEvent {
-        ChallengeEvent {
+    fn test_challenge(id: &str) -> Challenge {
+        Challenge {
             id: id.to_owned(),
             url: "testUrl".to_owned(),
             status: ChallengeStatus::Created,
@@ -336,7 +337,7 @@ mod tests {
         BotEvent::ChallengeCanceled(test_challenge("testChallengeCanceledId"))
     ])]
     #[case::challenge_declined(vec![
-        BotEvent::ChallengeDeclined(ChallengeDeclinedEvent {
+        BotEvent::ChallengeDeclined(ChallengeDeclined {
             id: "testChallengeDeclined".to_owned()
         })
     ])]
@@ -397,7 +398,7 @@ mod tests {
                 .mount(&server)
                 .await;
             let stream = stream::once(async {
-                Ok::<_, &str>(BotEvent::GameStart(GameStartFinishEvent {
+                Ok::<_, &str>(BotEvent::GameStart(GameStartFinish {
                     id: Some("testId".to_owned()),
                     source: None,
                     status: None,
